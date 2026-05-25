@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --color-wa-green: #25d366;
+  --color-wa-green-dark: #128c7e;
+  --color-wa-teal: #075e54;
+  --color-surface: #0b141a;
+  --color-panel: #111b21;
+  --color-card: #1f2c34;
+  --color-border: #2a3942;
+  --color-muted: #8696a0;
+  --color-text: #e9edef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App background: dot grid + soft top glow (WhatsApp-style) */
+.bg-app-pattern {
+  background-color: var(--color-surface);
+  background-image:
+    radial-gradient(
+      ellipse 90% 60% at 50% -15%,
+      rgba(18, 140, 126, 0.2),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 70% 40% at 100% 100%,
+      rgba(37, 211, 102, 0.06),
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at center,
+      rgba(37, 211, 102, 0.045) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle at center,
+      rgba(42, 57, 66, 0.35) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      rgba(42, 57, 66, 0.06) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(42, 57, 66, 0.06) 1px,
+      transparent 1px
+    );
+  background-size:
+    100% 100%,
+    100% 100%,
+    32px 32px,
+    16px 16px,
+    48px 48px,
+    48px 48px;
+  background-position:
+    center top,
+    bottom right,
+    0 0,
+    8px 8px,
+    0 0,
+    0 0;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
