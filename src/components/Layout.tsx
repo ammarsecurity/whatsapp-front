@@ -23,7 +23,7 @@ export function Layout() {
   const nav = isSuperAdmin
     ? [
         ...baseNav,
-        { to: '/admin', label: 'Super Admin', icon: Shield, end: false },
+        { to: '/admin', label: 'Admin', icon: Shield, end: false },
       ]
     : baseNav
 

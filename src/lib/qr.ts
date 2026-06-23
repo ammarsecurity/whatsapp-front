@@ -49,3 +49,40 @@ export async function qrResponseToImageSrc(
     color: { dark: '#000000', light: '#ffffff' },
   })
 }
+
+const EXPECTED_API_BUILD = '2026-06-02-v5'
+
+/** Human-readable QR endpoint error (includes outdated-backend hint). */
+export function formatQrApiError(data: Record<string, unknown>): string {
+  const err =
+    typeof data.error === 'string' ? data.error : 'Could not get QR code'
+
+  if (!data.apiBuild && err === 'QR not ready yet') {
+    return `${err} — Production is still running the OLD backend. Deploy the updated code from "New folder" on the server and restart PM2. After deploy, responses include apiBuild: "${EXPECTED_API_BUILD}".`
+  }
+
+  const state = data.liveState
+  if (typeof state === 'string' && state !== 'TIMEOUT') {
+    return `${err} (${state})`
+  }
+  return err
+}
+
+export async function parseQrApiResponse(data: Record<string, unknown>): Promise<{
+  ok: boolean
+  imageSrc: string | null
+  error: string | null
+}> {
+  if (data.success === false) {
+    return { ok: false, imageSrc: null, error: formatQrApiError(data) }
+  }
+  try {
+    const imageSrc = await qrResponseToImageSrc(data)
+    if (!imageSrc) {
+      return { ok: false, imageSrc: null, error: 'No QR payload in response' }
+    }
+    return { ok: true, imageSrc, error: null }
+  } catch {
+    return { ok: false, imageSrc: null, error: 'Could not generate QR image' }
+  }
+}

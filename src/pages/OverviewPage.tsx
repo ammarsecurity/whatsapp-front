@@ -1,12 +1,21 @@
-import { Activity, Radio, Server } from 'lucide-react'
+import { Activity, Globe, Radio, Server } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { ConnectionBadge } from '../components/ConnectionBadge'
 import { JsonBlock } from '../components/JsonBlock'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { api, ApiClientError } from '../lib/api'
+import { parseAccountStatus } from '../lib/accountStatus'
 import { getAccountId, setAccountId } from '../lib/storage'
+
+function readChrome(data: unknown) {
+  if (!data || typeof data !== 'object') return null
+  const chrome = (data as Record<string, unknown>).chrome
+  if (!chrome || typeof chrome !== 'object') return null
+  return chrome as Record<string, unknown>
+}
 
 export function OverviewPage() {
   const [accountId, setAccountIdState] = useState(getAccountId)
@@ -43,14 +52,25 @@ export function OverviewPage() {
     refresh()
   }
 
+  const systemObj =
+    systemData && typeof systemData === 'object'
+      ? (systemData as Record<string, unknown>)
+      : null
+
   const systemReady =
-    systemData &&
-    typeof systemData === 'object' &&
-    ('ready' in systemData || 'isReady' in systemData)
-      ? Boolean(
-          (systemData as { ready?: boolean; isReady?: boolean }).ready ??
-            (systemData as { isReady?: boolean }).isReady,
-        )
+    systemObj && ('ready' in systemObj || 'isReady' in systemObj)
+      ? Boolean(systemObj.ready ?? systemObj.isReady)
+      : null
+
+  const apiBuild =
+    typeof systemObj?.apiBuild === 'string' ? systemObj.apiBuild : null
+
+  const chrome = readChrome(systemData)
+  const chromeOk = chrome?.headlessLaunch === true
+
+  const accountStatus =
+    accountData && typeof accountData === 'object'
+      ? parseAccountStatus(accountData)
       : null
 
   return (
@@ -100,19 +120,70 @@ export function OverviewPage() {
                     : 'bg-amber-500/20 text-amber-300'
                 }`}
               >
-                {systemReady ? 'Ready' : 'Not ready'}
+                {systemReady ? 'Ready' : 'Warming up'}
               </span>
             ) : null
           }
         >
+          {apiBuild && (
+            <p className="mb-2 text-xs text-muted">
+              API build:{' '}
+              <code className="rounded bg-card px-1.5 py-0.5 text-wa-green">{apiBuild}</code>
+            </p>
+          )}
+          {chrome && (
+            <div className="mb-3 rounded-lg border border-border bg-surface/50 p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <Globe className="h-4 w-4 text-muted" />
+                Chrome (Ubuntu)
+                <span
+                  className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    chromeOk
+                      ? 'bg-wa-green/20 text-wa-green'
+                      : 'bg-red-500/15 text-red-300'
+                  }`}
+                >
+                  {chromeOk ? 'OK' : 'Failed'}
+                </span>
+              </div>
+              <ul className="space-y-1 text-xs text-muted">
+                <li>
+                  Path:{' '}
+                  <code className="text-text">
+                    {String(chrome.executablePath ?? '—')}
+                  </code>
+                </li>
+                {chrome.version != null && (
+                  <li>Version: {String(chrome.version)}</li>
+                )}
+                {!chromeOk && chrome.launchError != null && (
+                  <li className="text-red-300">{String(chrome.launchError)}</li>
+                )}
+              </ul>
+            </div>
+          )}
           <div className="mb-3 flex items-center gap-2 text-muted">
             <Server className="h-4 w-4" />
-            <span className="text-xs">isReady / system status</span>
+            <span className="text-xs">Full system payload</span>
           </div>
           <JsonBlock data={systemData ?? { loading: true }} />
         </Card>
 
         <Card title="Account status" description={`GET /accounts/${accountId}/status`}>
+          {accountStatus && (
+            <div className="mb-3">
+              <ConnectionBadge
+                state={accountStatus.state}
+                label={accountStatus.label}
+              />
+            </div>
+          )}
+          {accountStatus?.state === 'connected' && (
+            <Alert variant="success" title="Linked" className="mb-3">
+              WhatsApp is connected and ready. <code className="text-wa-green">qrCode: null</code> is
+              expected while the session is active.
+            </Alert>
+          )}
           <div className="mb-3 flex items-center gap-2 text-muted">
             <Activity className="h-4 w-4" />
             <span className="text-xs">Connection state</span>
@@ -125,11 +196,15 @@ export function OverviewPage() {
         <ul className="space-y-2 text-sm text-muted">
           <li className="flex gap-2">
             <Radio className="mt-0.5 h-4 w-4 shrink-0 text-wa-green" />
-            Link a device under Accounts → scan the QR code when status is disconnected.
+            If requests fail right after restart, wait ~20s (server warmup).
           </li>
           <li className="flex gap-2">
             <Radio className="mt-0.5 h-4 w-4 shrink-0 text-wa-green" />
-            Use Messages to verify numbers before bulk sending.
+            Link a device under Accounts → scan QR when disconnected.
+          </li>
+          <li className="flex gap-2">
+            <Radio className="mt-0.5 h-4 w-4 shrink-0 text-wa-green" />
+            Messages → History shows sent/failed logs from the database.
           </li>
         </ul>
       </Card>

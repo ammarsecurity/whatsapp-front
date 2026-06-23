@@ -103,6 +103,7 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
     for (const key of [
       'status',
       'state',
+      'liveState',
       'connectionState',
       'connection',
       'connectionStatus',
@@ -116,6 +117,14 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
           return { state: s, label: labelsFor(s), raw }
         }
       }
+    }
+
+    if (src.needsQr === true && !boolConnected(src.connected)) {
+      return { state: 'connecting', label: 'Needs QR', raw }
+    }
+
+    if (src.sessionActive === true) {
+      return { state: 'connected', label: 'Connected', raw }
     }
   }
 

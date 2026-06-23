@@ -5,7 +5,9 @@ const API_URL_KEY = 'wa_api_url'
 const ACCOUNT_KEY = 'wa_account_id'
 const USER_KEY = 'wa_user'
 
-export const DEFAULT_API_URL = 'http://74.50.65.142:8489'
+export const DEFAULT_API_URL =
+  import.meta.env.VITE_API_URL?.replace(/\/$/, '') ||
+  'http://74.50.65.142:8489'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)

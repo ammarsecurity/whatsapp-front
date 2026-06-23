@@ -11,9 +11,7 @@ import {
   setApiUrl,
 } from '../lib/storage'
 
-const PRESETS = [
-  { label: 'Primary server', url: 'http://74.50.65.142:8489' },
-]
+const PRESETS = [{ label: 'From .env', url: DEFAULT_API_URL }]
 
 type Tab = 'docs' | 'config'
 

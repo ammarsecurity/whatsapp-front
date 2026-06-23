@@ -4,9 +4,21 @@ import type {
   LoginRequest,
   SendMessageRequest,
 } from '../types/api'
-import type { CreateUserRequest } from '../types/models'
-import { parseAccountList, parseUserList } from './parseList'
-import type { AdminUser, WaAccount } from '../types/models'
+import type {
+  MessageHistoryFilters,
+  MessageRecord,
+  MessageStatistics,
+  SendMediaRequest,
+} from '../types/messages'
+import type { AdminUser, CreateUserRequest, AdminWaAccount, WaAccount } from '../types/models'
+import {
+  parseAccountList,
+  parseAdminAccountList,
+  parseMessageList,
+  parseMessageStatistics,
+  parseUserList,
+} from './parseList'
+import type { SystemHealthResponse } from '../types/systemHealth'
 import { getApiUrl, getToken } from './storage'
 
 export class ApiClientError extends Error {
@@ -48,10 +60,44 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const msg =
-      typeof data === 'object' && data !== null && 'message' in data
-        ? String((data as { message: string }).message)
-        : res.statusText || 'Request failed'
+    let msg = extractErrorMessage(data, res.statusText)
+    if (res.status === 503 && (msg === res.statusText || msg === 'Request failed')) {
+      msg = 'Server warming up — wait ~20 seconds after restart and retry'
+    }
+    throw new ApiClientError(msg, res.status, data)
+  }
+
+  return data as T
+}
+
+async function requestForm<T>(
+  path: string,
+  form: FormData,
+  auth = true,
+): Promise<T> {
+  const base = getApiUrl()
+  const headers: Record<string, string> = {}
+
+  if (auth) {
+    const token = getToken()
+    if (token) headers.Authorization = token
+  }
+
+  const res = await fetch(`${base}${path}`, { method: 'POST', headers, body: form })
+
+  let data: unknown
+  const text = await res.text()
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = text
+  }
+
+  if (!res.ok) {
+    let msg = extractErrorMessage(data, res.statusText)
+    if (res.status === 503 && (msg === res.statusText || msg === 'Request failed')) {
+      msg = 'Server warming up — wait ~20 seconds after restart and retry'
+    }
     throw new ApiClientError(msg, res.status, data)
   }
 
@@ -83,6 +129,20 @@ export function extractToken(data: Record<string, unknown>): string | null {
   if (typeof data.accessToken === 'string') return data.accessToken
   if (typeof data.access_token === 'string') return data.access_token
   return null
+}
+
+/** Backend uses `error`; some responses use `message`. */
+export function extractErrorMessage(
+  data: unknown,
+  fallback = 'Request failed',
+): string {
+  if (typeof data === 'object' && data !== null) {
+    const o = data as Record<string, unknown>
+    if (typeof o.error === 'string' && o.error.trim()) return o.error
+    if (typeof o.message === 'string' && o.message.trim()) return o.message
+  }
+  if (typeof data === 'string' && data.trim()) return data
+  return fallback || 'Request failed'
 }
 
 export const api = {
@@ -132,9 +192,17 @@ export const api = {
     )
   },
 
-  getQr(accountId: string) {
+  getQr(accountId: string, regenerate = false) {
+    const q = regenerate ? '?regenerate=1' : ''
     return request<Record<string, unknown>>(
-      `/api/accounts/${encodeURIComponent(accountId)}/qr`,
+      `/api/accounts/${encodeURIComponent(accountId)}/qr${q}`,
+    )
+  },
+
+  resetSession(accountId: string) {
+    return request<Record<string, unknown>>(
+      `/api/accounts/${encodeURIComponent(accountId)}/reset-session`,
+      { method: 'POST' },
     )
   },
 
@@ -146,10 +214,8 @@ export const api = {
   },
 
   addAccountByPath(accountId: string) {
-    return request<Record<string, unknown>>(
-      `/api/accounts/${encodeURIComponent(accountId)}`,
-      { method: 'POST' },
-    )
+    // Backend only exposes POST /api/accounts (no path variant)
+    return this.addAccount({ accountId })
   },
 
   deleteAccount(accountId: string) {
@@ -173,28 +239,93 @@ export const api = {
     })
   },
 
+  sendMedia(body: SendMediaRequest) {
+    const form = new FormData()
+    form.append('file', body.file)
+    form.append('accountId', body.accountId)
+    form.append('phoneNumbers', JSON.stringify(body.phoneNumbers))
+    form.append('mediaType', body.mediaType ?? 'document')
+    if (body.caption) form.append('caption', body.caption)
+    return requestForm<Record<string, unknown>>('/api/messages/send-media', form)
+  },
+
+  async messageHistory(filters: MessageHistoryFilters = {}): Promise<MessageRecord[]> {
+    const params = new URLSearchParams()
+    if (filters.accountId) params.set('accountId', filters.accountId)
+    if (filters.phoneNumber) params.set('phoneNumber', filters.phoneNumber)
+    if (filters.status) params.set('status', filters.status)
+    if (filters.limit != null) params.set('limit', String(filters.limit))
+    if (filters.offset != null) params.set('offset', String(filters.offset))
+    const q = params.toString()
+    const data = await request<unknown>(`/api/messages${q ? `?${q}` : ''}`)
+    return parseMessageList(data)
+  },
+
+  async messageStatistics(accountId?: string): Promise<MessageStatistics | null> {
+    const q = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
+    const data = await request<unknown>(`/api/messages/statistics${q}`)
+    return parseMessageStatistics(data)
+  },
+
+  getMessage(messageId: number) {
+    return request<Record<string, unknown>>(`/api/messages/${messageId}`)
+  },
+
   async listUsers(): Promise<AdminUser[]> {
-    const data = await requestFirst<unknown>([
-      '/api/users',
-      '/api/admin/users',
-      '/api/auth/users',
-    ])
+    const data = await request<unknown>('/api/users')
     return parseUserList(data)
   },
 
   createUser(body: CreateUserRequest) {
-    return requestFirst<Record<string, unknown>>(
-      ['/api/users', '/api/admin/users', '/api/auth/register-admin'],
-      { method: 'POST', body: JSON.stringify(body) },
-    )
+    return request<Record<string, unknown>>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
   },
 
   deleteUser(userId: number) {
-    return requestFirst<Record<string, unknown>>(
-      [
-        `/api/users/${userId}`,
-        `/api/admin/users/${userId}`,
-      ],
+    return request<Record<string, unknown>>(`/api/users/${userId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  adminAccountPath(userId: number, accountId: string) {
+    return `/api/admin/accounts/${userId}/${encodeURIComponent(accountId)}`
+  },
+
+  adminSystemHealth() {
+    return request<SystemHealthResponse>('/api/admin/system-health')
+  },
+
+  async listAllAccountsAdmin(): Promise<AdminWaAccount[]> {
+    const data = await request<unknown>('/api/admin/accounts')
+    return parseAdminAccountList(data)
+  },
+
+  adminDisconnectAccount(userId: number, accountId: string) {
+    return request<Record<string, unknown>>(
+      `${api.adminAccountPath(userId, accountId)}/disconnect`,
+      { method: 'POST' },
+    )
+  },
+
+  adminResetSession(userId: number, accountId: string) {
+    return request<Record<string, unknown>>(
+      `${api.adminAccountPath(userId, accountId)}/reset-session`,
+      { method: 'POST' },
+    )
+  },
+
+  adminGetQr(userId: number, accountId: string, regenerate = false) {
+    const q = regenerate ? '?regenerate=1' : ''
+    return request<Record<string, unknown>>(
+      `${api.adminAccountPath(userId, accountId)}/qr${q}`,
+    )
+  },
+
+  adminDeleteAccount(userId: number, accountId: string) {
+    return request<Record<string, unknown>>(
+      api.adminAccountPath(userId, accountId),
       { method: 'DELETE' },
     )
   },

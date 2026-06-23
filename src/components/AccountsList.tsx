@@ -1,6 +1,5 @@
 import { Check, RefreshCw, Smartphone, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { parseAccountStatus } from '../lib/accountStatus'
 import { api, ApiClientError } from '../lib/api'
 import type { WaAccount } from '../types/models'
 import { Alert } from './ui/Alert'
@@ -19,6 +18,33 @@ interface AccountsListProps {
   refreshKey?: number
 }
 
+function statusFromAccount(acc: WaAccount): AccountWithLiveStatus {
+  const connected =
+    acc.isConnected === true ||
+    acc.connected === true ||
+    acc.status === 'connected'
+  const ready =
+    acc.isReady === true ||
+    acc.ready === true ||
+    connected
+
+  let connectionState: AccountWithLiveStatus['connectionState'] = 'unknown'
+  let connectionLabel = 'Unknown'
+
+  if (connected || ready) {
+    connectionState = 'connected'
+    connectionLabel = 'Connected'
+  } else if (acc.status === 'connecting') {
+    connectionState = 'connecting'
+    connectionLabel = 'Connecting…'
+  } else {
+    connectionState = 'disconnected'
+    connectionLabel = 'Disconnected'
+  }
+
+  return { ...acc, connectionState, connectionLabel }
+}
+
 export function AccountsList({
   activeId,
   onSelect,
@@ -35,26 +61,7 @@ export function AccountsList({
     setError(null)
     try {
       const list = await api.listAccounts()
-      const withStatus = await Promise.all(
-        list.map(async (acc) => {
-          try {
-            const raw = await api.accountStatus(acc.accountId)
-            const parsed = parseAccountStatus(raw)
-            return {
-              ...acc,
-              connectionState: parsed.state,
-              connectionLabel: parsed.label,
-            }
-          } catch {
-            return {
-              ...acc,
-              connectionState: 'unknown' as const,
-              connectionLabel: '—',
-            }
-          }
-        }),
-      )
-      setAccounts(withStatus)
+      setAccounts(list.map(statusFromAccount))
     } catch (err) {
       setError(
         err instanceof ApiClientError

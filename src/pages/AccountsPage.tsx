@@ -10,7 +10,7 @@ import { Input } from '../components/ui/Input'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
-import { qrResponseToImageSrc } from '../lib/qr'
+import { parseQrApiResponse } from '../lib/qr'
 import { getAccountId, setAccountId } from '../lib/storage'
 
 export function AccountsPage() {
@@ -23,13 +23,32 @@ export function AccountsPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [watchConnection, setWatchConnection] = useState(true)
+  const [watchConnection, setWatchConnection] = useState(false)
   const [listRefresh, setListRefresh] = useState(0)
 
   const { status: linkStatus, polling: statusPolling, error: statusError } =
     useAccountStatusPoll(accountId, watchConnection)
 
   const isLinked = linkStatus?.state === 'connected'
+
+  async function applyQrResponse(data: unknown) {
+    setQrData(data)
+    setQrImage(null)
+    if (!data || typeof data !== 'object') return
+    const parsed = await parseQrApiResponse(data as Record<string, unknown>)
+    if (parsed.ok) {
+      setQrImage(parsed.imageSrc)
+      setError(null)
+    } else if (parsed.error) {
+      setError(parsed.error)
+    }
+  }
+
+  async function fetchQrForAccount(id: string, regenerate = false) {
+    setWatchConnection(true)
+    const action = regenerate ? 'reset' : 'qr'
+    await run(action, () => api.getQr(id, regenerate), applyQrResponse)
+  }
 
   function selectAccount(id: string) {
     setAccountIdState(id)
@@ -154,21 +173,17 @@ export function AccountsPage() {
                 onClick={() =>
                   run('add', () =>
                     api.addAccount({ accountId: newAccountId || accountId }),
+                    async () => {
+                      const id = (newAccountId || accountId).trim()
+                      if (!id) return
+                      selectAccount(id)
+                      setSuccess(`Account "${id}" created — loading QR…`)
+                      await fetchQrForAccount(id)
+                    },
                   )
                 }
               >
                 Add
-              </Button>
-              <Button
-                variant="secondary"
-                loading={loading === 'addPath'}
-                onClick={() =>
-                  run('addPath', () =>
-                    api.addAccountByPath(newAccountId || accountId),
-                  )
-                }
-              >
-                Add (path)
               </Button>
             </div>
           </div>
@@ -211,26 +226,18 @@ export function AccountsPage() {
             <Button
               variant="secondary"
               loading={loading === 'qr'}
-              disabled={isLinked}
-              onClick={() => {
-                setWatchConnection(true)
-                run('qr', () => api.getQr(accountId), async (data) => {
-                  setQrData(data)
-                  setQrImage(null)
-                  if (data && typeof data === 'object') {
-                    try {
-                      const src = await qrResponseToImageSrc(
-                        data as Record<string, unknown>,
-                      )
-                      setQrImage(src)
-                    } catch {
-                      setError('Could not generate QR image')
-                    }
-                  }
-                })
-              }}
+              disabled={isLinked || !accountId}
+              onClick={() => fetchQrForAccount(accountId)}
             >
               Fetch QR code
+            </Button>
+            <Button
+              variant="ghost"
+              loading={loading === 'reset'}
+              disabled={!accountId}
+              onClick={() => fetchQrForAccount(accountId, true)}
+            >
+              New QR (reset session)
             </Button>
             <Button
               variant="ghost"

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Sender API</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+    <!-- Login/Register Modal -->
+    <div id="authModal" class="modal active">
+        <div class="modal-content">
+            <div class="auth-container">
+                <div class="auth-tabs">
+                    <button class="tab-btn active" data-tab="login">تسجيل الدخول</button>
+                    <button class="tab-btn" data-tab="register">إنشاء حساب</button>
+                </div>
+
+                <!-- Login Form -->
+                <div id="loginTab" class="tab-content active">
+                    <h2>تسجيل الدخول</h2>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label><i class="fas fa-user"></i> اسم المستخدم</label>
+                            <input type="text" id="loginUsername" required>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-lock"></i> كلمة المرور</label>
+                            <input type="password" id="loginPassword" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-sign-in-alt"></i> تسجيل الدخول
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Register Form -->
+                <div id="registerTab" class="tab-content">
+                    <h2>إنشاء حساب جديد</h2>
+                    <form id="registerForm">
+                        <div class="form-group">
+                            <label><i class="fas fa-user"></i> اسم المستخدم</label>
+                            <input type="text" id="registerUsername" required minlength="3">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-lock"></i> كلمة المرور</label>
+                            <input type="password" id="registerPassword" required minlength="6">
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> إنشاء حساب
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div id="appContainer" class="hidden">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <h1><i class="fab fa-whatsapp"></i> WhatsApp Sender</h1>
+                <div class="header-actions">
+                    <span id="userInfo" class="user-info"></span>
+                    <button id="logoutBtn" class="btn btn-secondary">
+                        <i class="fas fa-sign-out-alt"></i> تسجيل الخروج
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <div class="container">
+                <button class="nav-btn active" data-page="accounts">
+                    <i class="fas fa-users"></i> الحسابات
+                </button>
+                <button class="nav-btn" data-page="send">
+                    <i class="fas fa-paper-plane"></i> إرسال رسالة
+                </button>
+                <button class="nav-btn" data-page="send-media">
+                    <i class="fas fa-file-upload"></i> إرسال ملف
+                </button>
+                <button class="nav-btn" data-page="messages">
+                    <i class="fas fa-history"></i> سجل الرسائل
+                </button>
+                <button class="nav-btn" data-page="statistics">
+                    <i class="fas fa-chart-bar"></i> الإحصائيات
+                </button>
+                <button class="nav-btn" data-page="check-number">
+                    <i class="fas fa-search"></i> التحقق من الرقم
+                </button>
+                <button class="nav-btn" data-page="about">
+                    <i class="fas fa-info-circle"></i> عن الشركة
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="container">
+                <!-- Accounts Page -->
+                <div id="accountsPage" class="page active">
+                    <div class="page-header">
+                        <h2><i class="fas fa-users"></i> إدارة الحسابات</h2>
+                        <button id="createAccountBtn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> إضافة حساب جديد
+                        </button>
+                    </div>
+                    <div id="accountsList" class="cards-grid"></div>
+                </div>
+
+                <!-- Send Message Page -->
+                <div id="sendPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-paper-plane"></i> إرسال رسالة</h2>
+                    </div>
+                    <div class="card">
+                        <form id="sendMessageForm">
+                            <div class="form-group">
+                                <label><i class="fas fa-user-circle"></i> الحساب</label>
+                                <select id="sendAccountId" required>
+                                    <option value="">اختر الحساب...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-phone"></i> أرقام الهواتف</label>
+                                <textarea id="phoneNumbers" placeholder="أدخل الأرقام (مفصولة بفواصل أو سطر جديد)&#10;مثال: 9647830200030, 9647501234567" required></textarea>
+                                <small>يمكنك إدخال عدة أرقام مفصولة بفواصل أو سطر جديد</small>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-comment"></i> الرسالة</label>
+                                <textarea id="messageText" rows="5" placeholder="اكتب الرسالة هنا..." required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i class="fas fa-paper-plane"></i> إرسال الرسالة
+                            </button>
+                        </form>
+                        <div id="sendResults" class="results-container"></div>
+                    </div>
+                </div>
+
+                <!-- Send Media Page -->
+                <div id="send-mediaPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-file-upload"></i> إرسال ملف</h2>
+                    </div>
+                    <div class="card">
+                        <form id="sendMediaForm">
+                            <div class="form-group">
+                                <label><i class="fas fa-user-circle"></i> الحساب</label>
+                                <select id="sendMediaAccountId" required>
+                                    <option value="">اختر الحساب...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-phone"></i> أرقام الهواتف</label>
+                                <textarea id="mediaPhoneNumbers" placeholder="أدخل الأرقام (مفصولة بفواصل أو سطر جديد)&#10;مثال: 9647830200030, 9647501234567" required></textarea>
+                                <small>يمكنك إدخال عدة أرقام مفصولة بفواصل أو سطر جديد</small>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-file"></i> الملف</label>
+                                <div class="file-upload-container">
+                                    <input type="file" id="mediaFile" accept="*/*" required>
+                                    <label for="mediaFile" class="file-upload-label">
+                                        <i class="fas fa-cloud-upload-alt"></i>
+                                        <span id="fileName">اختر ملف...</span>
+                                    </label>
+                                </div>
+                                <small>الحد الأقصى لحجم الملف: 100MB</small>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-tag"></i> نوع الملف</label>
+                                <select id="mediaType">
+                                    <option value="document">مستند</option>
+                                    <option value="image">صورة</option>
+                                    <option value="video">فيديو</option>
+                                    <option value="audio">صوت</option>
+                                </select>
+                                <small>سيتم تحديد النوع تلقائياً حسب امتداد الملف</small>
+                            </div>
+                            <div class="form-group">
+                                <label><i class="fas fa-comment"></i> نص توضيحي (اختياري)</label>
+                                <textarea id="mediaCaption" rows="3" placeholder="اكتب نص توضيحي للملف (اختياري)..."></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <i class="fas fa-paper-plane"></i> إرسال الملف
+                            </button>
+                        </form>
+                        <div id="sendMediaResults" class="results-container"></div>
+                    </div>
+                </div>
+
+                <!-- Messages History Page -->
+                <div id="messagesPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-history"></i> سجل الرسائل</h2>
+                        <div class="filters">
+                            <select id="filterAccount" style="font-family: 'Cairo', sans-serif !important;">
+                                <option value="">جميع الحسابات</option>
+                            </select>
+                            <select id="filterStatus" style="font-family: 'Cairo', sans-serif !important;">
+                                <option value="">جميع الحالات</option>
+                                <option value="sent">مرسلة</option>
+                                <option value="failed">فاشلة</option>
+                                <option value="pending">قيد الانتظار</option>
+                            </select>
+                            <button id="applyFilters" class="btn btn-secondary">
+                                <i class="fas fa-filter"></i> تطبيق
+                            </button>
+                        </div>
+                    </div>
+                    <div id="messagesList" class="messages-list"></div>
+                </div>
+
+                <!-- Statistics Page -->
+                <!-- Check Number Page -->
+                <div id="check-numberPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-search"></i> التحقق من الرقم</h2>
+                        <p>تحقق من أن الرقم مسجل في WhatsApp قبل الإرسال</p>
+                    </div>
+                    
+                    <div class="card">
+                        <form id="checkNumberForm">
+                            <div class="form-group">
+                                <label><i class="fas fa-users"></i> اختر الحساب</label>
+                                <select id="checkNumberAccountId" required>
+                                    <option value="">-- اختر الحساب --</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label><i class="fas fa-phone"></i> رقم الهاتف</label>
+                                <input type="text" id="checkNumberPhone" placeholder="9647830200030" required>
+                                <small>أدخل الرقم بدون + أو @c.us (مثال: 9647830200030)</small>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-search"></i> التحقق من الرقم
+                            </button>
+                        </form>
+                        
+                        <div id="checkNumberResult" class="check-result" style="display: none;">
+                            <div class="result-card">
+                                <div class="result-icon">
+                                    <i class="fas fa-check-circle" id="resultIcon"></i>
+                                </div>
+                                <div class="result-content">
+                                    <h3 id="resultTitle"></h3>
+                                    <p id="resultMessage"></p>
+                                    <div class="result-details">
+                                        <div class="detail-item">
+                                            <span class="detail-label">الرقم:</span>
+                                            <span class="detail-value" id="resultPhoneNumber"></span>
+                                        </div>
+                                        <div class="detail-item">
+                                            <span class="detail-label">الرقم المنسق:</span>
+                                            <span class="detail-value" id="resultFormattedNumber"></span>
+                                        </div>
+                                        <div class="detail-item">
+                                            <span class="detail-label">الحالة:</span>
+                                            <span class="detail-value" id="resultStatus"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="statisticsPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-chart-bar"></i> الإحصائيات</h2>
+                    </div>
+                    <div id="statisticsCards" class="cards-grid"></div>
+                </div>
+
+                <!-- About Page -->
+                <div id="aboutPage" class="page">
+                    <div class="page-header">
+                        <h2><i class="fas fa-info-circle"></i> عن الشركة</h2>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="about-content">
+                            <div class="company-logo">
+                                <i class="fas fa-building"></i>
+                            </div>
+                            <h1 class="company-name">الأفق لتكنولوجيا المعلومات</h1>
+                            
+                            <div class="company-info">
+                                <div class="info-item">
+                                    <i class="fas fa-phone"></i>
+                                    <span>07807110011</span>
+                                </div>
+                            </div>
+                            
+                            <div class="company-description">
+                                <h3>نبذة عن الشركة</h3>
+                                <p>
+                                    شركة الأفق لتكنولوجيا المعلومات هي شركة رائدة في مجال الحلول التقنية والبرمجيات، 
+                                    متخصصة في تطوير وتقديم خدمات متقدمة في مجال تكنولوجيا المعلومات والاتصالات. 
+                                    نسعى لتقديم حلول مبتكرة وموثوقة تلبي احتياجات عملائنا في مختلف القطاعات.
+                                </p>
+                                <p>
+                                    نتميز بخبرة واسعة في تطوير الأنظمة والبرمجيات، ونوفر خدمات شاملة تشمل 
+                                    تطوير التطبيقات، حلول الويب، أنظمة إدارة المحتوى، والتكامل مع مختلف المنصات 
+                                    والخدمات التقنية. نحن ملتزمون بتقديم أفضل الحلول التقنية التي تساعد عملاءنا 
+                                    على تحقيق أهدافهم بكفاءة وفعالية.
+                                </p>
+                                <p>
+                                    في شركة الأفق، نؤمن بأهمية الابتكار والجودة في كل ما نقدمه. فريقنا المختص 
+                                    يعمل بجد لضمان تقديم خدمات عالية الجودة تلبي أعلى المعايير التقنية. 
+                                    نسعى دائماً للبقاء في المقدمة من خلال مواكبة أحدث التطورات التقنية 
+                                    وتطبيق أفضل الممارسات في مجال تكنولوجيا المعلومات.
+                                </p>
+                            </div>
+                            
+                            <div class="company-features">
+                                <h3>خدماتنا</h3>
+                                <div class="features-grid">
+                                    <div class="feature-item">
+                                        <i class="fas fa-code"></i>
+                                        <h4>تطوير البرمجيات</h4>
+                                        <p>تطوير تطبيقات وبرمجيات مخصصة حسب احتياجاتك</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-globe"></i>
+                                        <h4>حلول الويب</h4>
+                                        <p>تصميم وتطوير مواقع ويب احترافية ومتجاوبة</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-mobile-alt"></i>
+                                        <h4>تطبيقات الجوال</h4>
+                                        <p>تطوير تطبيقات للهواتف الذكية والأجهزة اللوحية</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-cloud"></i>
+                                        <h4>الحلول السحابية</h4>
+                                        <p>خدمات الاستضافة والحلول السحابية المتقدمة</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-cogs"></i>
+                                        <h4>التكامل والأنظمة</h4>
+                                        <p>تكامل الأنظمة وتطوير حلول إدارة شاملة</p>
+                                    </div>
+                                    <div class="feature-item">
+                                        <i class="fas fa-headset"></i>
+                                        <h4>الدعم الفني</h4>
+                                        <p>دعم فني متواصل وخدمة عملاء متميزة</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="container">
+                <p>&copy; 2026 الأفق لتكنولوجيا المعلومات. جميع الحقوق محفوظة.</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Create Account Modal -->
+    <div id="createAccountModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>إضافة حساب WhatsApp جديد</h3>
+                <button class="close-btn" onclick="closeModal('createAccountModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="createAccountForm">
+                <div class="form-group">
+                    <label><i class="fas fa-tag"></i> اسم الحساب</label>
+                    <input type="text" id="newAccountId" placeholder="مثال: work, personal" required>
+                    <small>اسم فريد للحساب (مثل: work, personal)</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('createAccountModal')">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">إنشاء</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Account Confirmation Modal -->
+    <div id="deleteAccountModal" class="modal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle" style="color: var(--danger-color);"></i> تأكيد الحذف</h3>
+                <button class="close-btn" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div style="padding: 1.5rem;">
+                <p style="margin-bottom: 1rem; font-size: 1.1rem;">
+                    هل أنت متأكد من حذف الحساب <strong id="deleteAccountName"></strong>؟
+                </p>
+                <p style="color: #666; font-size: 0.9rem; margin-bottom: 1.5rem;">
+                    <i class="fas fa-info-circle"></i> سيتم حذف جميع البيانات المرتبطة بهذا الحساب ولا يمكن التراجع عن هذا الإجراء.
+                </p>
+                <div class="modal-footer" style="margin-top: 1.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">
+                        <i class="fas fa-times"></i> إلغاء
+                    </button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                        <i class="fas fa-trash"></i> حذف
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="spinner hidden">
+        <div class="spinner-content">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>جاري التحميل...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

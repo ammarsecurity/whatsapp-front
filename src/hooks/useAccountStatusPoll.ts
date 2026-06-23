@@ -5,7 +5,7 @@ import {
   type ParsedAccountStatus,
 } from '../lib/accountStatus'
 
-const POLL_MS = 2500
+const POLL_MS = 5000
 
 export function useAccountStatusPoll(accountId: string, enabled: boolean) {
   const [status, setStatus] = useState<ParsedAccountStatus | null>(null)
