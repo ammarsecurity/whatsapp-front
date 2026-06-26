@@ -10,6 +10,15 @@ const {
   getPuppeteerConfig,
   assertChromeReady,
 } = require('../config/chrome');
+const {
+  ACCOUNT_STATUSES,
+  AccountNotReadyError,
+  isMessagingAllowed,
+  isInitInProgress,
+} = require('../utils/accountLifecycle');
+
+const incomingHandler = require('./incomingHandler');
+const wsHub = require('./wsHub');
 
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -77,9 +86,154 @@ class WhatsAppService {
   constructor() {
     this.accounts = new Map(); // Map<accountId, accountData>
     this.initLocks = new Map(); // Map<accountKey, Promise<void>>
+    this.initializingAccounts = new Set(); // accountKey — prevent duplicate initialize
     this.reconnectTimers = new Map(); // Map<accountKey, NodeJS.Timeout>
     this.lastSendAtMs = new Map(); // Map<accountKey, number>
     this.loadAccountsFromDb(); // Load accounts from database on startup
+  }
+
+  _setAccountStatus(accountData, accountId, status) {
+    if (!accountData) return;
+    const prev = accountData.status;
+    accountData.status = status;
+    accountData.lastState = status;
+    if (prev !== status) {
+      console.log(`[${accountId}] STATUS => ${status}`);
+      const uid = accountData.userId;
+      if (uid) {
+        if (status === ACCOUNT_STATUSES.READY) {
+          wsHub.broadcast(uid, 'account.ready', { accountId, status });
+          require('./webhookDispatcher').dispatch(uid, 'account.ready', { accountId, status });
+        } else if (
+          status === ACCOUNT_STATUSES.LOGGED_OUT ||
+          status === ACCOUNT_STATUSES.DISCONNECTED ||
+          status === ACCOUNT_STATUSES.FAILED
+        ) {
+          wsHub.broadcast(uid, 'account.disconnected', { accountId, status });
+          require('./webhookDispatcher').dispatch(uid, 'account.disconnected', { accountId, status });
+        }
+      }
+    }
+    if (status === ACCOUNT_STATUSES.READY) {
+      accountData.isReady = true;
+      accountData.isConnected = true;
+      accountData.qrCode = null;
+      accountData.initError = null;
+    } else if (isInitInProgress(status) || status === ACCOUNT_STATUSES.DISCONNECTED) {
+      accountData.isReady = false;
+      accountData.isConnected = false;
+    } else if (
+      status === ACCOUNT_STATUSES.LOGGED_OUT ||
+      status === ACCOUNT_STATUSES.FAILED
+    ) {
+      accountData.isReady = false;
+      accountData.isConnected = false;
+      accountData.qrCode = null;
+    }
+    this._refreshGlobalReadyFlag();
+  }
+
+  _refreshGlobalReadyFlag() {
+    let anyReady = false;
+    for (const acc of this.accounts.values()) {
+      if (acc.status === ACCOUNT_STATUSES.READY && acc.isReady) {
+        anyReady = true;
+        break;
+      }
+    }
+    global.systemReady = anyReady;
+  }
+
+  /**
+   * Block message/history routes while account is pairing or loading.
+   * Allows DB reads when session is not in memory or logged out.
+   */
+  async assertAccountNotBusy(accountId, userId) {
+    const trimmed = String(accountId || '').trim();
+    if (!trimmed) throw new Error('accountId is required');
+
+    const exists = await AccountModel.exists(trimmed, userId);
+    if (!exists) {
+      throw new Error(`Account with ID "${trimmed}" not found for this user`);
+    }
+
+    const accountKey = this._getAccountKey(trimmed, userId);
+    if (this.initializingAccounts.has(accountKey)) {
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.INITIALIZING);
+    }
+
+    const account = this.accounts.get(accountKey);
+    if (account && isInitInProgress(account.status)) {
+      throw new AccountNotReadyError(trimmed, account.status);
+    }
+  }
+
+  /**
+   * Returns account + client only when status === ready and client.info exists.
+   * @throws {AccountNotReadyError}
+   */
+  async ensureAccountReady(accountId, userId) {
+    const trimmed = String(accountId || '').trim();
+    if (!trimmed) {
+      throw new Error('accountId is required');
+    }
+
+    const accountKey = this._getAccountKey(trimmed, userId);
+
+    if (this.initializingAccounts.has(accountKey)) {
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.INITIALIZING);
+    }
+
+    const exists = await AccountModel.exists(trimmed, userId);
+    if (!exists) {
+      throw new Error(`Account with ID "${trimmed}" not found for this user`);
+    }
+
+    let account = this.accounts.get(accountKey);
+    if (!account) {
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
+    const status = account.status || ACCOUNT_STATUSES.INITIALIZING;
+    if (!isMessagingAllowed(status)) {
+      throw new AccountNotReadyError(trimmed, status);
+    }
+
+    if (!account.client) {
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
+    try {
+      const wid = account.client.info?.wid?._serialized;
+      if (!wid) {
+        throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.LOADING);
+      }
+    } catch (err) {
+      if (err instanceof AccountNotReadyError) throw err;
+      this._handleClientProtocolError(account, trimmed, userId, err);
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.FAILED);
+    }
+
+    return account;
+  }
+
+  _handleClientProtocolError(account, accountId, userId, err) {
+    const msg = err?.message || String(err);
+    if (
+      msg.includes('Target closed') ||
+      msg.includes('detached Frame') ||
+      msg.includes('Session closed') ||
+      msg.includes('Protocol error')
+    ) {
+      console.error(`[${accountId}] Protocol/session error (non-fatal):`, msg);
+      const accountKey = this._getAccountKey(accountId, userId);
+      this._setAccountStatus(account, accountId, ACCOUNT_STATUSES.FAILED);
+      account.initError = msg;
+      this._safeDestroyClient(account.client, accountId).catch(() => {});
+      this.accounts.delete(accountKey);
+      this.initializingAccounts.delete(accountKey);
+      AccountModel.updateStatus(accountId, userId, false, false).catch(() => {});
+    }
   }
 
   _clearReconnectTimer(accountKey) {
@@ -195,13 +349,41 @@ class WhatsAppService {
 
   async _initializeClientOnce(accountId, userId) {
     const accountKey = this._getAccountKey(accountId, userId);
+
+    if (this.initializingAccounts.has(accountKey)) {
+      const lock = this.initLocks.get(accountKey);
+      if (lock) await lock;
+      return;
+    }
+
     const existing = this.initLocks.get(accountKey);
-    if (existing) return existing;
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const inMemory = this.accounts.get(accountKey);
+    if (inMemory && isInitInProgress(inMemory.status)) {
+      console.log(`[${accountId}] Initialize skipped — already ${inMemory.status}`);
+      if (inMemory.initPromise) await inMemory.initPromise.catch(() => {});
+      return;
+    }
+    if (inMemory && inMemory.status === ACCOUNT_STATUSES.READY) {
+      return;
+    }
+
+    this.initializingAccounts.add(accountKey);
 
     const initPromise = (async () => {
-      // If already in memory, do nothing.
-      if (this.accounts.has(accountKey)) return;
-      await this._initializeClient(accountId, userId);
+      try {
+        if (this.accounts.has(accountKey)) {
+          const acc = this.accounts.get(accountKey);
+          if (acc?.status === ACCOUNT_STATUSES.READY) return;
+        }
+        await this._initializeClient(accountId, userId);
+      } finally {
+        this.initializingAccounts.delete(accountKey);
+      }
     })();
 
     this.initLocks.set(accountKey, initPromise);
@@ -218,31 +400,7 @@ class WhatsAppService {
    * @private
    */
   async _ensureAccountReady(accountId, userId) {
-    const accountKey = this._getAccountKey(accountId, userId);
-    let account = this.accounts.get(accountKey) || null;
-
-    if (account?.client && account.isReady && account.isConnected) {
-      return account;
-    }
-
-    const dbAccount = await AccountModel.findByAccountId(accountId, userId);
-    if (!dbAccount) {
-      throw new Error(`Account with ID "${accountId}" not found for this user`);
-    }
-
-    if (!dbAccount.is_ready) {
-      throw new Error(`Account "${accountId}" is not connected. Please connect the account by scanning the QR code first.`);
-    }
-
-    // Account is ready in database but not in memory (or not ready in memory) - reconnect/initialize once.
-    console.log(`[${accountId}] Ensuring session is loaded in memory...`);
-    await this._initializeClientOnce(accountId, userId);
-
-    account = this.accounts.get(accountKey) || null;
-    const { readyTimeoutMs } = this._getQueueSettings();
-    await this._waitForAccountReady(account, readyTimeoutMs);
-
-    return account;
+    return this.ensureAccountReady(accountId, userId);
   }
 
 
@@ -452,115 +610,97 @@ class WhatsAppService {
       qrCode: null,
       isReady: false,
       isConnected: false,
+      status: ACCOUNT_STATUSES.INITIALIZING,
       reconnecting: false,
-      lastState: 'INITIALIZING',
+      lastState: ACCOUNT_STATUSES.INITIALIZING,
       initError: null,
       createdAt: new Date()
     };
 
     this.accounts.set(accountKey, accountData);
+    this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.INITIALIZING);
 
     /* ================= EVENTS ================= */
 
     client.on('loading_screen', (percent, message) => {
       console.log(`[${accountId}] Loading ${percent}% ${message}`);
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.LOADING);
     });
 
-    // QR
     client.on('qr', qr => {
       console.log(`[${accountId}] 📱 QR GENERATED`);
       accountData.qrCode = qr;
-      accountData.isReady = false;
-      accountData.isConnected = false;
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.QR);
     });
 
-
-    // أهم حدث في whatsapp-web.js
     client.on('change_state', async state => {
-
       accountData.lastState = state;
       console.log(`[${accountId}] STATE -> ${state}`);
 
       if (state === 'CONNECTED') {
-        accountData.isConnected = true;
-        accountData.isReady = true;
-        accountData.qrCode = null;
-        global.systemReady = true;
-
+        this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.READY);
         await AccountModel.updateStatus(accountId, userId, true, true);
       }
 
       if (state === 'UNPAIRED' || state === 'UNLAUNCHED') {
-        accountData.isConnected = false;
-        accountData.isReady = false;
-        global.systemReady = false;
-
+        this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.LOGGED_OUT);
         await AccountModel.updateStatus(accountId, userId, false, false);
-        console.log(`[${accountId}] ⚠️ SESSION LOST`);
+        console.log(`[${accountId}] ⚠️ SESSION LOST (${state})`);
       }
     });
 
-    // authenticated ≠ online
     client.on('authenticated', () => {
       console.log(`[${accountId}] Session restored`);
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.AUTHENTICATED);
     });
 
-
-
     client.on('ready', async () => {
-
       console.log(`[${accountId}] 🔥 WHATSAPP READY`);
-
-      accountData.isConnected = true;
-      accountData.isReady = true;
-      accountData.qrCode = null;
-      global.systemReady = true;
-
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.READY);
       await AccountModel.updateStatus(accountId, userId, true, true);
     });
 
-
+    client.on('message', async (msg) => {
+      await incomingHandler.handleIncoming(accountId, userId, msg, client);
+    });
 
     client.on('auth_failure', async msg => {
       console.log(`[${accountId}] ❌ AUTH FAILURE`, msg);
-
-      accountData.isConnected = false;
-      accountData.isReady = false;
-      global.systemReady = false;
-
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.FAILED);
+      accountData.initError = String(msg);
       await AccountModel.updateStatus(accountId, userId, false, false);
     });
-
 
     client.on('disconnected', async reason => {
       if (accountData.reconnecting) return;
       accountData.reconnecting = true;
 
+      const reasonUpper = String(reason || '').toUpperCase();
       console.log(`[${accountId}] 🔌 DISCONNECTED: ${reason}`);
 
-      accountData.isConnected = false;
-      accountData.isReady = false;
-      global.systemReady = false;
-
-      await AccountModel.updateStatus(accountId, userId, false, false);
-
-      const reasonUpper = String(reason || '').toUpperCase();
-      if (reasonUpper === 'LOGOUT' && fs.existsSync(sessionPath)) {
+      if (reasonUpper === 'LOGOUT') {
+        this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.LOGGED_OUT);
+        await AccountModel.updateStatus(accountId, userId, false, false);
+        await this._safeDestroyClient(client, accountId);
         try {
-          deleteDirectoryRecursive(sessionPath);
-          console.log(`[${accountId}] Cleared invalid session after LOGOUT`);
+          await this._clearSessionFiles(accountId, userId);
         } catch (err) {
-          console.warn(`[${accountId}] Could not clear session:`, err.message);
+          console.warn(`[${accountId}] Could not clear session after LOGOUT:`, err.message);
         }
+        this.initializingAccounts.delete(accountKey);
+        accountData.reconnecting = false;
+        return;
       }
 
+      this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.DISCONNECTED);
+      await AccountModel.updateStatus(accountId, userId, false, false);
       await this._safeDestroyClient(client, accountId);
       this.accounts.delete(accountKey);
+      this.initializingAccounts.delete(accountKey);
+      accountData.reconnecting = false;
 
-      if (reasonUpper !== 'LOGOUT') {
-        console.log(`[${accountId}] Scheduling reconnect in 8s...`);
-        this._scheduleReconnect(accountId, userId, reason, 8000);
-      }
+      console.log(`[${accountId}] Scheduling reconnect in 8s...`);
+      this._scheduleReconnect(accountId, userId, reason, 8000);
     });
 
 
@@ -598,16 +738,19 @@ class WhatsAppService {
         if (
           msg.includes('detached Frame') ||
           msg.includes('Target closed') ||
-          msg.includes('Session closed')
+          msg.includes('Session closed') ||
+          msg.includes('Protocol error')
         ) {
           await this._safeDestroyClient(client, accountId);
-          accountData.lastState = 'INIT_FAILED';
+          this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.FAILED);
           accountData.initError = msg;
+          this.accounts.delete(accountKey);
+          this.initializingAccounts.delete(accountKey);
           await AccountModel.updateStatus(accountId, userId, false, false);
           return;
         }
 
-        accountData.lastState = 'INIT_FAILED';
+        this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.FAILED);
         accountData.initError = msg;
         await AccountModel.updateStatus(accountId, userId, false, false);
       }
@@ -629,9 +772,15 @@ class WhatsAppService {
     /* Safety timeout — mark failed instead of silently removing account */
     setTimeout(() => {
       const current = this.accounts.get(accountKey);
-      if (current && !current.isConnected && !current.qrCode && !current.initError) {
+      if (
+        current &&
+        !current.isConnected &&
+        !current.qrCode &&
+        !current.initError &&
+        isInitInProgress(current.status)
+      ) {
         console.log(`[${accountId}] INIT TIMEOUT — no QR after 3 minutes`);
-        current.lastState = 'INIT_TIMEOUT';
+        this._setAccountStatus(current, accountId, ACCOUNT_STATUSES.FAILED);
         current.initError =
           'WhatsApp did not emit a QR within 3 minutes. Check Chrome on the server (GET /api/status/system → chrome).';
       }
@@ -708,9 +857,10 @@ class WhatsAppService {
     // Add database accounts
     dbAccounts.forEach(dbAccount => {
       const accountKey = `${userId}_${dbAccount.account_id}`;
-      accountsMap.set(dbAccount.account_id, {
+        accountsMap.set(dbAccount.account_id, {
         accountId: dbAccount.account_id,
         userId: dbAccount.user_id,
+        status: dbAccount.is_ready ? ACCOUNT_STATUSES.DISCONNECTED : ACCOUNT_STATUSES.LOGGED_OUT,
         isReady: dbAccount.is_ready,
         isConnected: dbAccount.is_connected,
         createdAt: dbAccount.created_at,
@@ -723,6 +873,7 @@ class WhatsAppService {
       if (account.userId === userId && accountsMap.has(account.accountId)) {
         accountsMap.set(account.accountId, {
           ...accountsMap.get(account.accountId),
+          status: account.status,
           isReady: account.isReady,
           isConnected: account.isConnected,
           hasQrCode: !!account.qrCode
@@ -747,6 +898,7 @@ class WhatsAppService {
         ownerUsername: row.owner_username,
         isReady: mem ? mem.isReady : !!row.is_ready,
         isConnected: mem ? mem.isConnected : !!row.is_connected,
+        status: mem?.status ?? (row.is_ready ? ACCOUNT_STATUSES.DISCONNECTED : ACCOUNT_STATUSES.LOGGED_OUT),
         inMemory: !!mem,
         hasQrCode: mem ? !!mem.qrCode : false,
         liveState: mem?.lastState ?? null,
@@ -980,6 +1132,7 @@ class WhatsAppService {
         connected: account?.isConnected ?? false,
         ready: account?.isReady ?? false,
         liveState: account?.lastState ?? null,
+        status: account?.status ?? ACCOUNT_STATUSES.DISCONNECTED,
       };
     }
 
@@ -987,17 +1140,29 @@ class WhatsAppService {
       const liveState = await account.client.getState();
       const connected = liveState === 'CONNECTED';
       account.lastState = liveState;
-      account.isConnected = connected;
-      account.isReady = connected;
-      if (connected) {
-        account.qrCode = null;
+      if (connected && account.status !== ACCOUNT_STATUSES.READY) {
+        this._setAccountStatus(account, account.accountId, ACCOUNT_STATUSES.READY);
+      } else if (!connected && account.status === ACCOUNT_STATUSES.READY) {
+        this._setAccountStatus(account, account.accountId, ACCOUNT_STATUSES.DISCONNECTED);
       }
-      return { connected, ready: connected, liveState };
-    } catch {
       return {
         connected: account.isConnected,
         ready: account.isReady,
+        liveState,
+        status: account.status,
+      };
+    } catch (err) {
+      this._handleClientProtocolError(
+        account,
+        account.accountId,
+        account.userId,
+        err,
+      );
+      return {
+        connected: false,
+        ready: false,
         liveState: account.lastState,
+        status: account.status ?? ACCOUNT_STATUSES.FAILED,
       };
     }
   }
@@ -1010,32 +1175,37 @@ class WhatsAppService {
     const account = this.getAccount(accountId, userId);
     if (account) {
       const live = await this._syncLiveState(account);
-      const sessionActive = live.connected && live.ready;
+      const sessionActive = live.status === ACCOUNT_STATUSES.READY;
 
       return {
         accountId: account.accountId,
         userId: account.userId,
+        status: live.status,
         connected: live.connected,
         ready: live.ready,
         liveState: live.liveState,
         inMemory: true,
         sessionActive,
-        // QR only exists while pairing — never when session is active
         qrCode: sessionActive ? null : account.qrCode,
         needsQr: !sessionActive && !account.qrCode,
+        initError: account.initError || null,
       };
     }
 
     try {
       const dbAccount = await AccountModel.findByAccountId(accountId, userId);
       if (dbAccount) {
+        const status = dbAccount.is_ready
+          ? ACCOUNT_STATUSES.DISCONNECTED
+          : ACCOUNT_STATUSES.LOGGED_OUT;
         return {
           accountId: dbAccount.account_id,
           userId: dbAccount.user_id,
+          status,
           connected: !!dbAccount.is_connected,
           ready: !!dbAccount.is_ready,
           inMemory: false,
-          sessionActive: !!dbAccount.is_connected && !!dbAccount.is_ready,
+          sessionActive: false,
           qrCode: null,
           needsQr: !dbAccount.is_connected,
           hint: 'Session not loaded in memory. Call GET /qr to start linking.',
@@ -1166,30 +1336,15 @@ class WhatsAppService {
   }
 
 
-  async sendMessages(accountId, userId, phoneNumbers, message) {
-
-    const account = await this._ensureAccountReady(accountId, userId);
+  async sendMessages(accountId, userId, phoneNumbers, message, options = {}) {
+    const account = await this.ensureAccountReady(accountId, userId);
     const results = [];
+    const delayBetween = Math.max(300, options.delayBetweenMs ?? 300);
 
-    // تحقق فعلي أن الصفحة تعمل
-    try {
-      await account.client.pupPage.evaluate(() => document.title);
-    } catch {
-      console.log(`[${accountId}] Page crashed — reloading session`);
-      await account.client.destroy();
-      this.accounts.delete(`${userId}_${accountId}`);
-      await this._initializeClientOnce(accountId, userId);
-      return this.sendMessages(accountId, userId, phoneNumbers, message);
-    }
-
-
-    for (const phone of phoneNumbers) {
-
+    for (let i = 0; i < phoneNumbers.length; i++) {
+      const phone = phoneNumbers[i];
       try {
         const { cleanedNumber, formattedNumber } = this._formatPhoneNumber(phone);
-
-        await this._waitForAccountReady(account);
-
         const splitMessage = require('../utils/messageSplitter');
         const parts = splitMessage(message);
 
@@ -1197,9 +1352,7 @@ class WhatsAppService {
 
         for (const part of parts) {
           const sent = await account.client.sendMessage(formattedNumber, part);
-          if (!firstMsg)
-            firstMsg = sent;
-
+          if (!firstMsg) firstMsg = sent;
           await new Promise(r => setTimeout(r, 300));
         }
 
@@ -1208,14 +1361,17 @@ class WhatsAppService {
           success: true,
           messageId: firstMsg?.id?._serialized || null
         });
-
       } catch (err) {
-
+        this._handleClientProtocolError(account, accountId, userId, err);
         results.push({
           phone,
           success: false,
           error: err.message
         });
+      }
+
+      if (i < phoneNumbers.length - 1) {
+        await new Promise(r => setTimeout(r, delayBetween));
       }
     }
 
@@ -1224,7 +1380,7 @@ class WhatsAppService {
 
 
   async sendMediaMessage(accountId, userId, phoneNumber, filePath, mediaType = 'document', caption = '') {
-    const account = await this._ensureAccountReady(accountId, userId);
+    const account = await this.ensureAccountReady(accountId, userId);
     const { cleanedNumber, formattedNumber } = this._formatPhoneNumber(phoneNumber);
 
     if (!fs.existsSync(filePath)) {
@@ -1274,7 +1430,7 @@ class WhatsAppService {
     mediaType = 'document',
     caption = '',
   ) {
-    await this._ensureAccountReady(accountId, userId);
+    await this.ensureAccountReady(accountId, userId);
     const results = [];
 
     for (const phone of phoneNumbers) {

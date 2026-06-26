@@ -31,7 +31,8 @@
     "qrcode-terminal": "^0.12.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.0",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

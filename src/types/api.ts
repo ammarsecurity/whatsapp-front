@@ -21,8 +21,23 @@ export interface CheckNumberRequest {
 
 export interface SendMessageRequest {
   accountId: string
-  message: string
   phoneNumbers: string[]
+  /** Plain text — omit if using templateId or templateName */
+  message?: string
+  templateId?: number
+  templateName?: string
+  templateVars?: Record<string, string>
+}
+
+export interface UpdateProfileRequest {
+  currentPassword: string
+  username?: string
+  password?: string
+}
+
+export interface UpdateUserRequest {
+  username?: string
+  password?: string
 }
 
 export type ApiError = {

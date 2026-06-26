@@ -5,32 +5,46 @@ import {
   Send,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { AccountPicker, SelectedAccountStatus } from '../components/AccountPicker'
 import { JsonBlock } from '../components/JsonBlock'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { FilterSelect, ListToolbar } from '../components/ui/ListToolbar'
 import { Input } from '../components/ui/Input'
+import { Pagination, DEFAULT_PAGE_SIZE } from '../components/ui/Pagination'
 import { Textarea } from '../components/ui/Textarea'
+import { useAccounts } from '../context/AccountContext'
+import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
-import { getAccountId } from '../lib/storage'
+import { formatAccountLabel } from '../lib/accountDisplay'
+import { isAccountReady } from '../lib/accountStatus'
 import type { MessageRecord, MessageStatistics } from '../types/messages'
 
 type Tab = 'compose' | 'media' | 'history'
 type LoadingKey = 'check' | 'send' | 'media' | 'history' | null
 
 export function MessagesPage() {
+  const { selectedAccountId } = useAccounts()
+  const accountId = selectedAccountId
+
   const [tab, setTab] = useState<Tab>('compose')
-  const [accountId] = useState(getAccountId)
-  const [phoneNumber, setPhoneNumber] = useState('9647807110011')
-  const [message, setMessage] = useState('hello!')
-  const [phoneList, setPhoneList] = useState('9647807110011')
-  const [mediaPhones, setMediaPhones] = useState('9647807110011')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [message, setMessage] = useState('')
+  const [phoneList, setPhoneList] = useState('')
+  const [mediaPhones, setMediaPhones] = useState('')
   const [caption, setCaption] = useState('')
   const [mediaType, setMediaType] = useState<'image' | 'document' | 'audio' | 'video'>('document')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
 
   const [historyStatus, setHistoryStatus] = useState<'all' | 'sent' | 'failed' | 'pending'>('all')
+  const [historySearch, setHistorySearch] = useState('')
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [history, setHistory] = useState<MessageRecord[]>([])
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyTotalPages, setHistoryTotalPages] = useState(1)
   const [stats, setStats] = useState<MessageStatistics | null>(null)
 
   const [checkResult, setCheckResult] = useState<unknown>(null)
@@ -38,6 +52,12 @@ export function MessagesPage() {
   const [mediaResult, setMediaResult] = useState<unknown>(null)
   const [loading, setLoading] = useState<LoadingKey>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showApiDetails, setShowApiDetails] = useState(false)
+
+  const { status: accountStatus, polling, refresh: refreshAccountStatus } =
+    useAccountStatusPoll(accountId, !!accountId)
+  const accountReady = isAccountReady(accountStatus?.raw)
+  const displayName = accountId ? formatAccountLabel(accountId) : ''
 
   function parsePhones(raw: string): string[] {
     return raw
@@ -47,6 +67,7 @@ export function MessagesPage() {
   }
 
   async function checkNumber() {
+    if (!accountId) return
     setLoading('check')
     setError(null)
     try {
@@ -61,6 +82,7 @@ export function MessagesPage() {
   }
 
   async function sendMessage() {
+    if (!accountId) return
     setLoading('send')
     setError(null)
     const phoneNumbers = parsePhones(phoneList)
@@ -81,6 +103,7 @@ export function MessagesPage() {
   }
 
   async function sendMedia() {
+    if (!accountId) return
     setLoading('media')
     setError(null)
     const phoneNumbers = parsePhones(mediaPhones)
@@ -112,31 +135,43 @@ export function MessagesPage() {
   }
 
   const loadHistory = useCallback(async () => {
+    if (!accountId) return
     setLoading('history')
     setError(null)
     try {
-      const [messages, statistics] = await Promise.all([
+      const offset = (historyPage - 1) * historyPageSize
+      const [page, statistics] = await Promise.all([
         api.messageHistory({
           accountId,
+          search: historySearch.trim() || undefined,
           status: historyStatus === 'all' ? undefined : historyStatus,
-          limit: 50,
+          limit: historyPageSize,
+          offset,
         }),
         api.messageStatistics(accountId),
       ])
-      setHistory(messages)
+      setHistory(page.items)
+      setHistoryTotal(page.total)
+      setHistoryTotalPages(page.totalPages)
       setStats(statistics)
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : 'Failed to load history')
       setHistory([])
+      setHistoryTotal(0)
+      setHistoryTotalPages(1)
       setStats(null)
     } finally {
       setLoading(null)
     }
-  }, [accountId, historyStatus])
+  }, [accountId, historyStatus, historySearch, historyPage, historyPageSize])
 
   useEffect(() => {
-    if (tab === 'history') loadHistory()
-  }, [tab, loadHistory])
+    setHistoryPage(1)
+  }, [accountId, historyStatus, historySearch, historyPageSize])
+
+  useEffect(() => {
+    if (tab === 'history' && accountId) loadHistory()
+  }, [tab, loadHistory, accountId])
 
   const tabs: { id: Tab; label: string; icon: typeof Send }[] = [
     { id: 'compose', label: 'Compose', icon: Send },
@@ -149,10 +184,29 @@ export function MessagesPage() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Messages</h1>
         <p className="mt-1 text-sm text-muted">
-          Send, attach media, and view history for account{' '}
-          <code className="rounded bg-card px-1.5 py-0.5 text-wa-green">{accountId}</code>
+          Send and track messages from your linked WhatsApp numbers
         </p>
       </header>
+
+      <Card title="Send from">
+        <AccountPicker compact showStatus={false} />
+        {accountId && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
+            <SelectedAccountStatus statusData={accountStatus} polling={polling} />
+            {!accountReady && (
+              <p className="text-sm text-amber-600">
+                {displayName} is not ready yet.{' '}
+                <Link to="/accounts" className="underline">
+                  Link it with QR
+                </Link>
+              </p>
+            )}
+            <Button variant="ghost" onClick={() => refreshAccountStatus()}>
+              Refresh status
+            </Button>
+          </div>
+        )}
+      </Card>
 
       <div className="flex rounded-xl border border-border bg-panel p-1">
         {tabs.map(({ id, label, icon: Icon }) => (
@@ -178,11 +232,21 @@ export function MessagesPage() {
         </Alert>
       )}
 
-      {tab === 'compose' && (
+      {!accountId && (
+        <Alert variant="info" title="Choose an account">
+          Select a WhatsApp account above, or{' '}
+          <Link to="/accounts" className="text-wa-green underline">
+            add one first
+          </Link>
+          .
+        </Alert>
+      )}
+
+      {tab === 'compose' && accountId && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card
-            title="Check number"
-            description="POST /api/messages/check-number"
+            title="Check a number"
+            description="See if a phone number has WhatsApp"
             action={<Phone className="h-4 w-4 text-muted" />}
           >
             <div className="space-y-3">
@@ -191,18 +255,31 @@ export function MessagesPage() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 placeholder="9647807110011"
-                hint="Include country code, no + sign. Account must be loaded in server memory."
+                hint="Country code without + (e.g. 964 for Iraq)"
               />
-              <Button loading={loading === 'check'} onClick={checkNumber}>
+              <Button
+                loading={loading === 'check'}
+                disabled={!accountReady}
+                onClick={checkNumber}
+              >
                 Check on WhatsApp
               </Button>
-              {checkResult !== null && <JsonBlock data={checkResult} />}
+              {checkResult !== null && showApiDetails && (
+                <JsonBlock data={checkResult} />
+              )}
+              {checkResult !== null && !showApiDetails && typeof checkResult === 'object' && checkResult && 'exists' in (checkResult as object) && (
+                <p className="text-sm text-text">
+                  {(checkResult as { exists?: boolean }).exists
+                    ? '✓ This number is on WhatsApp'
+                    : '✗ Not found on WhatsApp'}
+                </p>
+              )}
             </div>
           </Card>
 
           <Card
-            title="Send message"
-            description="POST /api/messages/send"
+            title="Send a message"
+            description={`From ${displayName}`}
             action={<Send className="h-4 w-4 text-muted" />}
           >
             <div className="space-y-3">
@@ -211,32 +288,40 @@ export function MessagesPage() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 rows={3}
+                placeholder="Write your message…"
               />
               <Textarea
                 label="Recipients"
                 value={phoneList}
                 onChange={(e) => setPhoneList(e.target.value)}
                 rows={3}
-                hint="One per line, or comma-separated"
+                hint="One number per line, or separated by commas"
+                placeholder="9647807110011"
               />
-              <Button loading={loading === 'send'} onClick={sendMessage}>
+              <Button
+                loading={loading === 'send'}
+                disabled={!accountReady}
+                onClick={sendMessage}
+              >
                 Send message
               </Button>
-              {sendResult !== null && <JsonBlock data={sendResult} />}
+              {sendResult !== null && showApiDetails && (
+                <JsonBlock data={sendResult} />
+              )}
             </div>
           </Card>
         </div>
       )}
 
-      {tab === 'media' && (
+      {tab === 'media' && accountId && (
         <Card
-          title="Send media"
-          description="POST /api/messages/send-media (multipart)"
+          title="Send a file"
+          description={`Photos, documents, audio or video from ${displayName}`}
           action={<Image className="h-4 w-4 text-muted" />}
         >
           <div className="space-y-3">
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-muted">File</span>
+              <span className="text-sm font-medium text-muted">Choose file</span>
               <input
                 type="file"
                 onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
@@ -244,7 +329,7 @@ export function MessagesPage() {
               />
             </label>
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-muted">Media type</span>
+              <span className="text-sm font-medium text-muted">File type</span>
               <select
                 value={mediaType}
                 onChange={(e) =>
@@ -269,17 +354,23 @@ export function MessagesPage() {
               value={mediaPhones}
               onChange={(e) => setMediaPhones(e.target.value)}
               rows={3}
-              hint="One per line, or comma-separated"
+              hint="One number per line, or separated by commas"
             />
-            <Button loading={loading === 'media'} onClick={sendMedia}>
-              Send media
+            <Button
+              loading={loading === 'media'}
+              disabled={!accountReady}
+              onClick={sendMedia}
+            >
+              Send file
             </Button>
-            {mediaResult !== null && <JsonBlock data={mediaResult} />}
+            {mediaResult !== null && showApiDetails && (
+              <JsonBlock data={mediaResult} />
+            )}
           </div>
         </Card>
       )}
 
-      {tab === 'history' && (
+      {tab === 'history' && accountId && (
         <div className="space-y-4">
           {stats && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -304,86 +395,109 @@ export function MessagesPage() {
 
           <Card
             title="Message history"
-            description="GET /api/messages · GET /api/messages/statistics"
+            description={displayName}
           >
-            <div className="mb-4 flex flex-wrap items-end gap-3">
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium text-muted">Status filter</span>
-                <select
-                  value={historyStatus}
-                  onChange={(e) =>
-                    setHistoryStatus(e.target.value as typeof historyStatus)
-                  }
-                  className="rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text"
-                >
-                  <option value="all">All</option>
-                  <option value="sent">Sent</option>
-                  <option value="failed">Failed</option>
-                  <option value="pending">Pending</option>
-                </select>
-              </label>
+            <ListToolbar
+              search={historySearch}
+              onSearchChange={setHistorySearch}
+              searchPlaceholder="Search by phone number…"
+            >
+              <FilterSelect
+                label="Status"
+                value={historyStatus}
+                onChange={(v) => setHistoryStatus(v as typeof historyStatus)}
+                options={[
+                  { value: 'all', label: 'All messages' },
+                  { value: 'sent', label: 'Sent' },
+                  { value: 'failed', label: 'Failed' },
+                  { value: 'pending', label: 'Pending' },
+                ]}
+              />
               <Button loading={loading === 'history'} onClick={loadHistory}>
                 Refresh
               </Button>
-            </div>
+            </ListToolbar>
 
             {loading === 'history' && history.length === 0 ? (
               <p className="text-sm text-muted">Loading…</p>
             ) : history.length === 0 ? (
-              <Alert variant="info" title="No messages">
-                No message records for this account yet.
+              <Alert variant="info" title="No messages yet">
+                Messages sent from {displayName} will appear here.
               </Alert>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-panel text-xs text-muted">
-                      <th className="px-3 py-2 font-medium">ID</th>
-                      <th className="px-3 py-2 font-medium">Phone</th>
-                      <th className="px-3 py-2 font-medium">Type</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Preview</th>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((row) => (
-                      <tr
-                        key={row.id}
-                        className="border-b border-border/60 last:border-0 hover:bg-panel/40"
-                      >
-                        <td className="px-3 py-2 text-muted">{row.id}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{row.phoneNumber}</td>
-                        <td className="px-3 py-2">{row.messageType}</td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              row.status === 'sent'
-                                ? 'bg-wa-green/15 text-wa-green'
-                                : row.status === 'failed'
-                                  ? 'bg-red-500/15 text-red-300'
-                                  : 'bg-amber-500/15 text-amber-300'
-                            }`}
-                          >
-                            {row.status}
-                          </span>
-                        </td>
-                        <td className="max-w-[200px] truncate px-3 py-2 text-muted">
-                          {row.mediaFileName ?? row.messageText}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted">
-                          {row.createdAt
-                            ? new Date(row.createdAt).toLocaleString()
-                            : '—'}
-                        </td>
+              <>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-panel text-xs text-muted">
+                        <th className="px-3 py-2 font-medium">Phone</th>
+                        <th className="px-3 py-2 font-medium">Type</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Preview</th>
+                        <th className="px-3 py-2 font-medium">Date</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {history.map((row) => (
+                        <tr
+                          key={row.id}
+                          className="border-b border-border/60 last:border-0 hover:bg-panel/40"
+                        >
+                          <td className="px-3 py-2 font-mono text-xs">{row.phoneNumber}</td>
+                          <td className="px-3 py-2">{row.messageType}</td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                row.status === 'sent'
+                                  ? 'bg-wa-green/15 text-wa-green'
+                                  : row.status === 'failed'
+                                    ? 'bg-red-500/15 text-red-300'
+                                    : 'bg-amber-500/15 text-amber-300'
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className="max-w-[200px] truncate px-3 py-2 text-muted">
+                            {row.mediaFileName ?? row.messageText}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted">
+                            {row.createdAt
+                              ? new Date(row.createdAt).toLocaleString()
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination
+                  page={historyPage}
+                  totalPages={historyTotalPages}
+                  total={historyTotal}
+                  pageSize={historyPageSize}
+                  onPageChange={setHistoryPage}
+                  onPageSizeChange={(size) => {
+                    setHistoryPageSize(size)
+                    setHistoryPage(1)
+                  }}
+                />
+              </>
             )}
           </Card>
         </div>
+      )}
+
+      {accountId && (
+        <label className="flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showApiDetails}
+            onChange={(e) => setShowApiDetails(e.target.checked)}
+            className="rounded border-border"
+          />
+          Show API response details (developers)
+        </label>
       )}
     </div>
   )

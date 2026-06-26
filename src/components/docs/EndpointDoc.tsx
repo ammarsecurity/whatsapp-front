@@ -4,7 +4,14 @@ import { MethodBadge } from './MethodBadge'
 import { CodeBlock } from './CodeBlock'
 
 function buildCurl(endpoint: DocEndpoint, baseUrl: string): string {
-  const url = `${baseUrl}${endpoint.path.replace(':accountId', 'ibsprimary').replace(':userId', '1')}`
+  const path = endpoint.path
+    .replace(':accountId', 'work')
+    .replace(':userId', '1')
+    .replace(':groupId', '1')
+    .replace(':campaignId', '10')
+    .replace(':phone', '9647807110011')
+    .replace(':id', '1')
+  const url = `${baseUrl}${path.split('?')[0]}`
   const lines = [`curl -X ${endpoint.method} "${url}"`]
   if (endpoint.body) {
     lines.push(`  -H "Content-Type: application/json"`)
@@ -12,6 +19,7 @@ function buildCurl(endpoint: DocEndpoint, baseUrl: string): string {
   }
   if (endpoint.auth) {
     lines.push(`  -H "Authorization: <your_jwt_token>"`)
+    lines.push(`  # Or: -H "X-API-Key: wsk_..."`)
   }
   return lines.join(' \\\n')
 }
@@ -33,7 +41,7 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
 
       <h3 className="text-base font-semibold text-text">{endpoint.title}</h3>
       <p className="mt-1 text-sm leading-relaxed text-muted">
-        {endpoint.description}
+        {endpoint.description ?? endpoint.title}
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">

@@ -88,17 +88,11 @@ class Message {
     return rows;
   }
 
-  /**
-   * Get all messages with filters (requires userId)
-   */
-  static async findAll(filters = {}) {
-    const { userId, accountId, phoneNumber, status, limit = 100, offset = 0 } = filters;
-    
-    if (!userId) {
-      throw new Error('userId is required');
-    }
-    
-    let query = 'SELECT * FROM messages WHERE user_id = ?';
+  static _buildFilterQuery(filters = {}) {
+    const { userId, accountId, phoneNumber, search, status } = filters;
+    if (!userId) throw new Error('userId is required');
+
+    let query = ' FROM messages WHERE user_id = ?';
     const params = [userId];
 
     if (accountId) {
@@ -109,6 +103,12 @@ class Message {
     if (phoneNumber) {
       query += ' AND phone_number = ?';
       params.push(phoneNumber);
+    } else if (search) {
+      const digits = String(search).replace(/\D/g, '');
+      if (digits) {
+        query += ' AND phone_number LIKE ?';
+        params.push(`%${digits}%`);
+      }
     }
 
     if (status) {
@@ -116,10 +116,26 @@ class Message {
       params.push(status);
     }
 
-    query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(limit, offset);
+    return { query, params };
+  }
 
-    const [rows] = await pool.execute(query, params);
+  static async countAll(filters = {}) {
+    const { query, params } = this._buildFilterQuery(filters);
+    const [rows] = await pool.execute(`SELECT COUNT(*) AS total ${query}`, params);
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  /**
+   * Get all messages with filters (requires userId)
+   */
+  static async findAll(filters = {}) {
+    const { limit = 100, offset = 0 } = filters;
+    const { query, params } = this._buildFilterQuery(filters);
+
+    const [rows] = await pool.execute(
+      `SELECT * ${query} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
     return rows;
   }
 

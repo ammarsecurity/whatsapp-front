@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const MessageModel = require('../models/Message');
-const { verifyToken } = require('../middleware/auth');
+const whatsappService = require('../services/whatsapp');
+const { AccountNotReadyError } = require('../utils/accountLifecycle');
+const { respondNotReady } = require('../middleware/accountReady');
 
 /**
  * @swagger
@@ -80,24 +82,42 @@ const { verifyToken } = require('../middleware/auth');
  */
 router.get('/', async (req, res) => {
   try {
-    const { accountId, phoneNumber, status, limit = 100, offset = 0 } = req.query;
+    const { accountId, phoneNumber, search, status, limit = 20, offset = 0 } = req.query;
     const userId = req.userId;
+
+    if (accountId) {
+      try {
+        await whatsappService.assertAccountNotBusy(String(accountId).trim(), userId);
+      } catch (err) {
+        if (err instanceof AccountNotReadyError) {
+          return respondNotReady(res, err);
+        }
+        if (err.message?.includes('not found')) {
+          return res.status(404).json({ success: false, error: err.message });
+        }
+        throw err;
+      }
+    }
 
     const filters = { userId };
     if (accountId) filters.accountId = accountId;
     if (phoneNumber) filters.phoneNumber = phoneNumber;
+    if (search) filters.search = search;
     if (status) filters.status = status;
-    filters.limit = parseInt(limit);
-    filters.offset = parseInt(offset);
+    filters.limit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    filters.offset = Math.max(0, parseInt(offset, 10) || 0);
 
-    const messages = await MessageModel.findAll(filters);
+    const [messages, total] = await Promise.all([
+      MessageModel.findAll(filters),
+      MessageModel.countAll(filters),
+    ]);
 
     res.json({
       success: true,
       messages,
-      total: messages.length,
+      total,
       limit: filters.limit,
-      offset: filters.offset
+      offset: filters.offset,
     });
   } catch (error) {
     console.error('Error getting message history:', error);
@@ -152,6 +172,21 @@ router.get('/statistics', async (req, res) => {
   try {
     const { accountId } = req.query;
     const userId = req.userId;
+
+    if (accountId) {
+      try {
+        await whatsappService.assertAccountNotBusy(String(accountId).trim(), userId);
+      } catch (err) {
+        if (err instanceof AccountNotReadyError) {
+          return respondNotReady(res, err);
+        }
+        if (err.message?.includes('not found')) {
+          return res.status(404).json({ success: false, error: err.message });
+        }
+        throw err;
+      }
+    }
+
     const statistics = await MessageModel.getStatistics(userId, accountId || null);
 
     res.json({

@@ -1,27 +1,38 @@
 import { BookOpen, Key, Zap } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   API_VERSION,
+  API_BUILD,
   DOC_ERRORS,
   DOC_QUICK_START,
-  DOC_SECTIONS,
+  getVisibleDocSections,
 } from '../../data/apiDocs'
+import { useAuth } from '../../context/AuthContext'
 import { DEFAULT_API_URL, getApiUrl } from '../../lib/storage'
 import { EndpointDoc } from './EndpointDoc'
 import { CodeBlock } from './CodeBlock'
 
-const NAV_ITEMS = [
-  { id: 'intro', title: 'Introduction' },
-  { id: 'quickstart', title: 'Quick start' },
-  { id: 'headers', title: 'Headers' },
-  ...DOC_SECTIONS.filter((s) => s.id !== 'intro').map((s) => ({
-    id: s.id,
-    title: s.title,
-    endpoints: s.endpoints,
-  })),
-]
-
 export function ApiDocs() {
+  const { isSuperAdmin } = useAuth()
+  const docSections = useMemo(
+    () => getVisibleDocSections(isSuperAdmin),
+    [isSuperAdmin],
+  )
+
+  const navItems = useMemo(
+    () => [
+      { id: 'intro', title: 'Introduction' },
+      { id: 'quickstart', title: 'Quick start' },
+      { id: 'headers', title: 'Headers' },
+      ...docSections.filter((s) => s.id !== 'intro').map((s) => ({
+        id: s.id,
+        title: s.title,
+        endpoints: s.endpoints,
+      })),
+    ],
+    [docSections],
+  )
+
   const [activeSection, setActiveSection] = useState('intro')
   const baseUrl = getApiUrl()
 
@@ -40,7 +51,7 @@ export function ApiDocs() {
     )
     sections.forEach((el) => observer.observe(el))
     return () => observer.disconnect()
-  }, [])
+  }, [docSections])
 
   function scrollTo(id: string) {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })
@@ -55,7 +66,7 @@ export function ApiDocs() {
           On this page
         </p>
         <ul className="space-y-0.5 rounded-xl border border-border bg-panel p-2 text-sm">
-          {NAV_ITEMS.map((section) => (
+          {navItems.map((section) => (
             <li key={section.id}>
               <button
                 type="button"
@@ -98,12 +109,19 @@ export function ApiDocs() {
         >
           <h2 className="text-xl font-bold text-text">WhatsApp API</h2>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            Developer reference for the WhatsApp messaging backend. Base URL,
-            authentication, account lifecycle, and message endpoints.
+            Developer reference for the WhatsApp messaging backend: accounts,
+            messages, contact groups, campaigns, templates, inbox, auto-replies,
+            webhooks, API keys, and WebSocket events.
+            {!isSuperAdmin && (
+              <> Admin-only endpoints are hidden from this view.</>
+            )}
           </p>
           <div className="mt-4 flex flex-wrap gap-3 text-xs">
             <span className="rounded-full border border-border bg-panel px-3 py-1 text-muted">
               Version {API_VERSION}
+            </span>
+            <span className="rounded-full border border-border bg-panel px-3 py-1 text-muted">
+              Build {API_BUILD}
             </span>
             <span className="rounded-full border border-border bg-panel px-3 py-1 font-mono text-wa-green">
               {baseUrl || DEFAULT_API_URL}
@@ -145,13 +163,18 @@ export function ApiDocs() {
             language="http"
             code={`Content-Type: application/json
 Authorization: <jwt_from_login>
+# Or machine access:
+X-API-Key: wsk_<your_api_key>
 
-# Base URL (no trailing slash)
-${baseUrl || DEFAULT_API_URL}`}
+# Base URL (no trailing slash, no /api suffix)
+${baseUrl || DEFAULT_API_URL}
+
+# Public health check (no auth)
+GET ${baseUrl || DEFAULT_API_URL}/health`}
           />
         </section>
 
-        {DOC_SECTIONS.filter((s) => s.id !== 'intro').map((section) => (
+        {docSections.filter((s) => s.id !== 'intro').map((section) => (
           <section
             key={section.id}
             id={section.id}

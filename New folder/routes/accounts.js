@@ -267,6 +267,33 @@ router.post('/:accountId/reset-session', async (req, res) => {
   }
 });
 
+router.post('/:accountId/disconnect', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'User ID not found. Please login again.',
+      });
+    }
+
+    const result = await whatsappService.disconnectAccount(accountId, userId);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (err) {
+    console.error('DISCONNECT ERROR:', err);
+    if (err.message?.includes('not found')) {
+      return res.status(404).json({ success: false, error: err.message });
+    }
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 
 /**

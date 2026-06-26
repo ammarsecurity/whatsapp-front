@@ -8,9 +8,8 @@ import { useAuth } from '../context/AuthContext'
 import { ApiClientError } from '../lib/api'
 
 export function LoginPage() {
-  const { login, register } = useAuth()
+  const { login } = useAuth()
   const navigate = useNavigate()
-  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -21,11 +20,7 @@ export function LoginPage() {
     setError(null)
     setLoading(true)
     try {
-      if (mode === 'login') {
-        await login(username, password)
-      } else {
-        await register(username, password)
-      }
+      await login(username, password)
       navigate('/', { replace: true })
     } catch (err) {
       setError(
@@ -54,23 +49,6 @@ export function LoginPage() {
         </div>
 
         <div className="rounded-2xl border border-border bg-panel p-6 shadow-xl shadow-black/30">
-          <div className="mb-6 flex rounded-lg bg-surface p-1">
-            {(['login', 'register'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`flex-1 rounded-md py-2 text-sm font-medium capitalize transition-colors ${
-                  mode === m
-                    ? 'bg-card text-text shadow-sm'
-                    : 'text-muted hover:text-text'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Username"
@@ -87,9 +65,7 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              autoComplete={
-                mode === 'login' ? 'current-password' : 'new-password'
-              }
+              autoComplete="current-password"
             />
 
             {error && (
@@ -98,13 +74,8 @@ export function LoginPage() {
               </Alert>
             )}
 
-            <Button
-              type="submit"
-              className="w-full"
-              loading={loading}
-              variant="primary"
-            >
-              {mode === 'login' ? 'Sign in' : 'Create account'}
+            <Button type="submit" className="w-full" loading={loading} variant="primary">
+              Sign in
             </Button>
           </form>
         </div>

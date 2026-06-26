@@ -22,7 +22,11 @@ interface AuthContextValue {
   isAuthenticated: boolean
   isSuperAdmin: boolean
   login: (username: string, password: string) => Promise<void>
-  register: (username: string, password: string) => Promise<void>
+  updateProfile: (body: {
+    currentPassword: string
+    username?: string
+    password?: string
+  }) => Promise<void>
   logout: () => void
 }
 
@@ -47,13 +51,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applySession(t, data)
   }, [applySession])
 
-  const register = useCallback(async (username: string, password: string) => {
-    await api.register({ username, password })
-    const data = await api.login({ username, password })
-    const t = extractToken(data)
-    if (!t) throw new Error('No token in login response')
-    applySession(t, data)
-  }, [applySession])
+  const updateProfile = useCallback(
+    async (body: {
+      currentPassword: string
+      username?: string
+      password?: string
+    }) => {
+      const data = await api.updateProfile(body)
+      const t = extractToken(data)
+      if (!t) throw new Error('No token in profile update response')
+      applySession(t, data)
+    },
+    [applySession],
+  )
 
   const logout = useCallback(() => {
     clearToken()
@@ -68,10 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: !!token,
       isSuperAdmin: isSuperAdmin(user),
       login,
-      register,
+      updateProfile,
       logout,
     }),
-    [token, user, login, register, logout],
+    [token, user, login, updateProfile, logout],
   )
 
   return (

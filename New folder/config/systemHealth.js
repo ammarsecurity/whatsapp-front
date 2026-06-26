@@ -118,7 +118,7 @@ async function getSystemHealth(whatsappService) {
       id: 'systemReady',
       label: 'WhatsApp bridge ready',
       ok: global.systemReady === true,
-      detail: global.systemReady ? 'Accepting API traffic' : 'Warmup (~20s after restart)',
+      detail: global.systemReady ? 'At least one account ready' : 'No account ready yet',
     },
     {
       id: 'chromeBinary',

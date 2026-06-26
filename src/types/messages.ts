@@ -1,6 +1,7 @@
 export interface MessageHistoryFilters {
   accountId?: string
   phoneNumber?: string
+  search?: string
   status?: 'pending' | 'sent' | 'failed'
   limit?: number
   offset?: number

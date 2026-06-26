@@ -10,8 +10,10 @@ import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 import { Card } from './ui/Card'
 import { Input } from './ui/Input'
+import { Pagination, DEFAULT_PAGE_SIZE } from './ui/Pagination'
 import { useConfirm } from '../context/ConfirmContext'
 import { api, ApiClientError } from '../lib/api'
+import { paginateMeta, slicePage } from '../lib/pagination'
 import { parseQrApiResponse } from '../lib/qr'
 import type { AdminWaAccount } from '../types/models'
 
@@ -32,6 +34,8 @@ export function AdminAccountsPanel() {
   const confirmDialog = useConfirm()
   const [accounts, setAccounts] = useState<AdminWaAccount[]>([])
   const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [actionKey, setActionKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +65,10 @@ export function AdminAccountsPanel() {
     load()
   }, [load])
 
+  useEffect(() => {
+    setPage(1)
+  }, [filter, pageSize])
+
   const filtered = accounts.filter((a) => {
     const q = filter.trim().toLowerCase()
     if (!q) return true
@@ -70,6 +78,9 @@ export function AdminAccountsPanel() {
       (a.ownerUsername ?? '').toLowerCase().includes(q)
     )
   })
+
+  const { totalPages } = paginateMeta(filtered.length, pageSize, (page - 1) * pageSize)
+  const paged = slicePage(filtered, page, pageSize)
 
   async function runAction(
     key: string,
@@ -191,20 +202,21 @@ export function AdminAccountsPanel() {
             No WhatsApp accounts match your filter.
           </Alert>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full min-w-[900px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-panel text-xs text-muted">
-                  <th className="px-3 py-2 font-medium">User</th>
-                  <th className="px-3 py-2 font-medium">Account</th>
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Memory</th>
-                  <th className="px-3 py-2 font-medium">State</th>
-                  <th className="px-3 py-2 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((acc) => {
+          <>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-panel text-xs text-muted">
+                    <th className="px-3 py-2 font-medium">User</th>
+                    <th className="px-3 py-2 font-medium">Account</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium">Memory</th>
+                    <th className="px-3 py-2 font-medium">State</th>
+                    <th className="px-3 py-2 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.map((acc) => {
                   const st = statusLabel(acc)
                   const base = `${acc.userId}-${acc.accountId}`
                   return (
@@ -274,6 +286,18 @@ export function AdminAccountsPanel() {
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            total={filtered.length}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size)
+              setPage(1)
+            }}
+          />
+          </>
         )}
       </Card>
 

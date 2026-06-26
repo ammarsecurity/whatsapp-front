@@ -1,6 +1,6 @@
 import { QrCode, UserPlus } from 'lucide-react'
-import { useState } from 'react'
-import { AccountsList } from '../components/AccountsList'
+import { useEffect, useState } from 'react'
+import { AccountPicker } from '../components/AccountPicker'
 import { ConnectionBadge } from '../components/ConnectionBadge'
 import { JsonBlock } from '../components/JsonBlock'
 import { Alert } from '../components/ui/Alert'
@@ -8,28 +8,45 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { useConfirm } from '../context/ConfirmContext'
+import { useAccounts } from '../context/AccountContext'
 import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
+import { formatAccountLabel, slugifyAccountName } from '../lib/accountDisplay'
+import { isAccountReady } from '../lib/accountStatus'
 import { parseQrApiResponse } from '../lib/qr'
-import { getAccountId, setAccountId } from '../lib/storage'
 
 export function AccountsPage() {
   const confirmDialog = useConfirm()
-  const [accountId, setAccountIdState] = useState(getAccountId)
-  const [newAccountId, setNewAccountId] = useState('')
+  const {
+    selectedAccountId,
+    selectAccount,
+    refreshAccounts,
+  } = useAccounts()
+
+  const [newAccountName, setNewAccountName] = useState('')
   const [qrData, setQrData] = useState<unknown>(null)
   const [qrImage, setQrImage] = useState<string | null>(null)
-  const [result, setResult] = useState<unknown>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [watchConnection, setWatchConnection] = useState(false)
-  const [listRefresh, setListRefresh] = useState(0)
+  const [showTechnical, setShowTechnical] = useState(false)
 
-  const { status: linkStatus, polling: statusPolling, error: statusError } =
-    useAccountStatusPoll(accountId, watchConnection)
+  const { status: linkStatus, polling: statusPolling, error: statusError, refresh: refreshLinkStatus } =
+    useAccountStatusPoll(selectedAccountId, watchConnection && !!selectedAccountId)
 
-  const isLinked = linkStatus?.state === 'connected'
+  const accountReady = isAccountReady(linkStatus?.raw)
+  const isLinked =
+    accountReady || linkStatus?.state === 'connected'
+  const displayName = selectedAccountId
+    ? formatAccountLabel(selectedAccountId)
+    : ''
+
+  useEffect(() => {
+    setQrData(null)
+    setQrImage(null)
+    setWatchConnection(false)
+  }, [selectedAccountId])
 
   async function applyQrResponse(data: unknown) {
     setQrData(data)
@@ -44,43 +61,65 @@ export function AccountsPage() {
     }
   }
 
-  async function fetchQrForAccount(id: string, regenerate = false) {
+  async function fetchQrForAccount(regenerate = false) {
+    if (!selectedAccountId) return
     setWatchConnection(true)
     const action = regenerate ? 'reset' : 'qr'
-    await run(action, () => api.getQr(id, regenerate), applyQrResponse)
+    await run(action, () => api.getQr(selectedAccountId, regenerate), applyQrResponse)
   }
 
-  function selectAccount(id: string) {
-    setAccountIdState(id)
-    setAccountId(id)
+  async function addAccount() {
+    const slug = slugifyAccountName(newAccountName)
+    if (!newAccountName.trim()) {
+      setError('Enter a name for this WhatsApp account')
+      return
+    }
+    await run('add', () => api.addAccount({ accountId: slug }), async () => {
+      selectAccount(slug)
+      setNewAccountName('')
+      setSuccess(`"${formatAccountLabel(slug)}" added — scan the QR code to link`)
+      await refreshAccounts()
+      await fetchQrForAccount(false)
+    })
   }
 
-  function persistAccount() {
-    setAccountId(accountId)
-    setSuccess(`Active account set to ${accountId}`)
-  }
-
-  async function deleteAccount(id: string) {
+  async function disconnectSelectedAccount() {
+    if (!selectedAccountId) return
     const ok = await confirmDialog({
-      title: 'Delete account',
-      message: `Remove "${id}" from the server? This action cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: 'Disconnect WhatsApp',
+      message: `Unlink "${displayName}" from this server? The account stays in your list — you can link again with a QR code.`,
+      confirmLabel: 'Disconnect',
       variant: 'danger',
     })
     if (!ok) return
-    run(`delete-${id}`, () => api.deleteAccount(id), () => {
-      setSuccess(`Account "${id}" deleted`)
-      if (accountId === id) {
-        setAccountIdState('')
-        setAccountId('')
-        setQrData(null)
-        setQrImage(null)
-      }
+    const id = selectedAccountId
+    await run('disconnect', () => api.disconnectAccount(id), async () => {
+      setSuccess(`"${displayName}" disconnected`)
+      setQrData(null)
+      setQrImage(null)
+      setWatchConnection(false)
+      await refreshAccounts()
+      await refreshLinkStatus()
     })
   }
 
-  const deletingId =
-    loading?.startsWith('delete-') ? loading.slice(7) : null
+  async function deleteSelectedAccount() {
+    if (!selectedAccountId) return
+    const ok = await confirmDialog({
+      title: 'Remove account',
+      message: `Remove "${displayName}" from the server? You will need to link again with a new QR.`,
+      confirmLabel: 'Remove',
+      variant: 'danger',
+    })
+    if (!ok) return
+    const id = selectedAccountId
+    await run(`delete-${id}`, () => api.deleteAccount(id), async () => {
+      setSuccess(`"${displayName}" removed`)
+      setQrData(null)
+      setQrImage(null)
+      await refreshAccounts()
+    })
+  }
 
   async function run(
     action: string,
@@ -92,14 +131,11 @@ export function AccountsPage() {
     setSuccess(null)
     try {
       const data = await fn()
-      setResult(data)
       await onSuccess?.(data)
-      setListRefresh((k) => k + 1)
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Request failed',
+        err instanceof ApiClientError ? err.message : 'Something went wrong',
       )
-      setResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
     }
@@ -108,9 +144,9 @@ export function AccountsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">Accounts</h1>
+        <h1 className="text-2xl font-bold tracking-tight">WhatsApp accounts</h1>
         <p className="mt-1 text-sm text-muted">
-          Your WhatsApp accounts — select one to manage and link
+          Add your numbers, link them with QR, and switch between them anytime
         </p>
       </header>
 
@@ -120,142 +156,128 @@ export function AccountsPage() {
         </Alert>
       )}
       {success && (
-        <Alert
-          variant="success"
-          title="Success"
-          onDismiss={() => setSuccess(null)}
-        >
+        <Alert variant="success" title="Done" onDismiss={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
-      <Card title="Your accounts" description="GET /api/accounts">
-        <AccountsList
-          activeId={accountId}
-          onSelect={selectAccount}
-          onDelete={deleteAccount}
-          deletingId={deletingId}
-          refreshKey={listRefresh}
-        />
+      <Card title="Your accounts">
+        <AccountPicker showStatus={false} />
       </Card>
 
-      <Card title="Active account">
+      <Card
+        title="Add a new WhatsApp"
+        description="Give it a name you will recognize — e.g. Work, Sales, Support"
+        action={<UserPlus className="h-4 w-4 text-muted" />}
+      >
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[200px] flex-1">
             <Input
-              label="Account ID"
-              value={accountId}
-              onChange={(e) => setAccountIdState(e.target.value)}
+              label="Account name"
+              value={newAccountName}
+              onChange={(e) => setNewAccountName(e.target.value)}
+              placeholder="Work phone"
+              hint={
+                newAccountName.trim()
+                  ? `Will be saved as: ${slugifyAccountName(newAccountName)}`
+                  : 'Use letters and numbers only'
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addAccount()
+              }}
             />
           </div>
-          <Button variant="secondary" onClick={persistAccount}>
-            Set active
+          <Button loading={loading === 'add'} onClick={addAccount}>
+            Add account
           </Button>
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {selectedAccountId && (
         <Card
-          title="Add account"
-          description="POST /api/accounts"
-          action={<UserPlus className="h-4 w-4 text-muted" />}
-        >
-          <div className="space-y-3">
-            <Input
-              label="New account ID"
-              value={newAccountId}
-              onChange={(e) => setNewAccountId(e.target.value)}
-              placeholder="ibsprimary"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                loading={loading === 'add'}
-                onClick={() =>
-                  run('add', () =>
-                    api.addAccount({ accountId: newAccountId || accountId }),
-                    async () => {
-                      const id = (newAccountId || accountId).trim()
-                      if (!id) return
-                      selectAccount(id)
-                      setSuccess(`Account "${id}" created — loading QR…`)
-                      await fetchQrForAccount(id)
-                    },
-                  )
-                }
-              >
-                Add
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card
-          title="Link device"
-          description={`${accountId} — status / qr`}
+          title={`Link ${displayName}`}
+          description="Open WhatsApp on your phone → Linked devices → Link a device"
           action={<QrCode className="h-4 w-4 text-muted" />}
         >
           <div className="mb-4 space-y-3">
             {linkStatus ? (
               <ConnectionBadge
-                state={linkStatus.state}
-                label={linkStatus.label}
-                polling={statusPolling && !isLinked}
+                state={accountReady ? 'connected' : linkStatus.state}
+                label={accountReady ? 'Ready to send messages' : linkStatus.label}
+                polling={statusPolling && !accountReady}
               />
             ) : watchConnection ? (
-              <ConnectionBadge
-                state="connecting"
-                label="Checking…"
-                polling
-              />
+              <ConnectionBadge state="connecting" label="Checking connection…" polling />
             ) : null}
 
-            {isLinked && (
-              <Alert variant="success" title="Connected">
-                Account is ready to send messages.
+            {accountReady && (
+              <Alert variant="success" title="Linked">
+                This account is connected. Go to Messages to send.
               </Alert>
             )}
 
-            {statusError && !isLinked && (
-              <Alert variant="error" title="Connection status">
+            {isLinked && !accountReady && (
+              <Alert variant="info" title="Connected">
+                WhatsApp is linked but still starting up. Wait a moment or refresh.
+              </Alert>
+            )}
+
+            {statusError && !accountReady && (
+              <Alert variant="error" title="Connection">
                 {statusError}
               </Alert>
             )}
           </div>
 
           <div className="mb-4 flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              loading={loading === 'qr'}
-              disabled={isLinked || !accountId}
-              onClick={() => fetchQrForAccount(accountId)}
-            >
-              Fetch QR code
-            </Button>
+            {!accountReady && (
+              <Button
+                variant="secondary"
+                loading={loading === 'qr'}
+                onClick={() => fetchQrForAccount(false)}
+              >
+                Show QR code
+              </Button>
+            )}
+            {isLinked && (
+              <Button
+                variant="secondary"
+                loading={loading === 'disconnect'}
+                onClick={disconnectSelectedAccount}
+              >
+                Disconnect
+              </Button>
+            )}
             <Button
               variant="ghost"
               loading={loading === 'reset'}
-              disabled={!accountId}
-              onClick={() => fetchQrForAccount(accountId, true)}
+              onClick={() => fetchQrForAccount(true)}
             >
-              New QR (reset session)
+              {isLinked ? 'Link another phone (new QR)' : 'Generate new QR'}
             </Button>
+            {!watchConnection && !accountReady && (
+              <Button variant="ghost" onClick={() => setWatchConnection(true)}>
+                Check connection
+              </Button>
+            )}
             <Button
-              variant="ghost"
-              onClick={() => setWatchConnection((v) => !v)}
+              variant="danger"
+              loading={loading === `delete-${selectedAccountId}`}
+              onClick={deleteSelectedAccount}
             >
-              {watchConnection ? 'Stop polling' : 'Poll status'}
+              Remove account
             </Button>
           </div>
 
-          {qrImage && !isLinked && (
+          {qrImage && !accountReady && (
             <div className="mb-4 flex flex-col items-center gap-2 rounded-xl bg-white p-5">
               <img
                 src={qrImage}
-                alt="WhatsApp QR"
+                alt="WhatsApp QR code"
                 className="h-64 w-64 object-contain"
               />
               <p className="text-center text-xs text-gray-600">
-                WhatsApp → Linked devices → Link a device
+                Scan with WhatsApp → Linked devices → Link a device
               </p>
               {statusPolling && (
                 <p className="text-center text-xs text-amber-600">
@@ -265,24 +287,20 @@ export function AccountsPage() {
             </div>
           )}
 
-          {linkStatus && (
-            <details className="mb-3">
+          {(linkStatus || qrData !== null) && (
+            <details
+              open={showTechnical}
+              onToggle={(e) => setShowTechnical((e.target as HTMLDetailsElement).open)}
+            >
               <summary className="cursor-pointer text-xs text-muted hover:text-text">
-                API details
+                Technical details (for developers)
               </summary>
-              <div className="mt-2">
-                <JsonBlock data={linkStatus.raw} />
+              <div className="mt-2 space-y-2">
+                {linkStatus && <JsonBlock data={linkStatus.raw} />}
+                {qrData !== null && !accountReady && <JsonBlock data={qrData} />}
               </div>
             </details>
           )}
-
-          {qrData !== null && !isLinked ? <JsonBlock data={qrData} /> : null}
-        </Card>
-      </div>
-
-      {result !== null && (
-        <Card title="Last response">
-          <JsonBlock data={result} />
         </Card>
       )}
     </div>

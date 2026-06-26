@@ -4,35 +4,47 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const whatsappService = require('../services/whatsapp');
-const { verifyToken } = require('../middleware/auth');
+const UserQuota = require('../models/UserQuota');
+const { resolveMessage } = require('../utils/resolveMessage');
+const { AccountNotReadyError } = require('../utils/accountLifecycle');
+const { respondNotReady } = require('../middleware/accountReady');
 
-
-// Configure multer for file uploads
 const upload = multer({
   dest: 'uploads/',
   limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB max file size
+    fileSize: 100 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
-    // Accept all file types
     cb(null, true);
   }
 });
 
-// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+function handleRouteError(res, error) {
+  if (error instanceof AccountNotReadyError) {
+    return respondNotReady(res, error);
+  }
+  if (error.message?.includes('not found')) {
+    return res.status(404).json({ success: false, error: error.message });
+  }
+  console.error('Message route error:', error);
+  return res.status(500).json({
+    success: false,
+    error: error.message || 'Internal server error'
+  });
+}
 
 router.post('/send', async (req, res) => {
   try {
-    const { accountId, phoneNumbers, message } = req.body;
+    const { accountId, phoneNumbers, message, templateId, templateName, templateVars } = req.body;
     const userId = req.userId;
+    const trimmedId = String(accountId || '').trim();
 
-    // Validation
-    if (!accountId || typeof accountId !== 'string' || accountId.trim().length === 0) {
+    if (!trimmedId) {
       return res.status(400).json({
         success: false,
         error: 'accountId is required and must be a non-empty string'
@@ -46,112 +58,81 @@ router.post('/send', async (req, res) => {
       });
     }
 
-    if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'message is required and must be a non-empty string'
+    let resolvedMessage;
+    try {
+      resolvedMessage = await resolveMessage(userId, {
+        message,
+        templateId,
+        templateName,
+        templateVars,
       });
+    } catch (resolveErr) {
+      const code = resolveErr.status || 400;
+      return res.status(code).json({ success: false, error: resolveErr.message });
     }
 
-    // Check if account exists for this user (in memory or database)
-    const account = whatsappService.getAccount(accountId.trim(), userId);
-    if (!account) {
-      // Check database if not in memory
-      const AccountModel = require('../models/Account');
-      const dbAccount = await AccountModel.findByAccountId(accountId.trim(), userId);
-      if (!dbAccount) {
-        return res.status(404).json({
-          success: false,
-          error: `Account with ID "${accountId}" not found. Please create the account first.`
-        });
-      }
-      
-      // Account exists in database but not connected - check if it's ready
-      if (!dbAccount.is_ready) {
-        return res.status(400).json({
-          success: false,
-          error: `Account "${accountId}" is not connected. Please connect the account by scanning the QR code first.`
-        });
-      }
-    } else {
-      // Account is in memory - check if it's ready
-      if (!account.isReady) {
-        return res.status(400).json({
-          success: false,
-          error: `Account "${accountId}" is not ready. Please wait for connection.`
-        });
-      }
+    const quota = await UserQuota.checkMessageQuota(userId, phoneNumbers.length);
+    if (!quota.ok) {
+      return res.status(429).json({ success: false, error: quota.error, quota });
     }
 
-    // Send messages
-    const results = await whatsappService.sendMessages(accountId.trim(), userId, phoneNumbers, message.trim());
+    await whatsappService.ensureAccountReady(trimmedId, userId);
+    const results = await whatsappService.sendMessages(
+      trimmedId,
+      userId,
+      phoneNumbers,
+      resolvedMessage
+    );
 
-    // Count successes and failures
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
+    if (successCount > 0) {
+      await UserQuota.incrementMessages(userId, successCount);
+    }
+
     res.json({
       success: true,
-      accountId: accountId.trim(),
+      accountId: trimmedId,
       total: phoneNumbers.length,
       successCount,
       failureCount,
+      message: resolvedMessage,
       results
     });
   } catch (error) {
-    console.error('Error sending messages:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error'
-    });
+    return handleRouteError(res, error);
   }
 });
-
-
 
 router.post('/check-number', async (req, res) => {
   try {
     const { accountId, phoneNumber } = req.body;
     const userId = req.userId;
+    const trimmedId = String(accountId || '').trim();
 
-    if (!accountId || !phoneNumber)
+    if (!trimmedId || !phoneNumber) {
       return res.status(400).json({ success: false, error: 'Missing data' });
+    }
 
-    // جيب الحساب من الذاكرة
-    const account = whatsappService.getAccount(accountId.trim(), userId);
-
-    if (!account || !account.client)
-      return res.status(404).json({
-        success: false,
-        error: 'Account not connected'
-      });
-
-    if (!account.isReady)
-      return res.status(400).json({
-        success: false,
-        error: 'WhatsApp not ready yet'
-      });
-
-    // 🔥 الفحص الحقيقي بدون HTTP
+    const account = await whatsappService.ensureAccountReady(trimmedId, userId);
     const numberId = await account.client.getNumberId(phoneNumber);
+
+    await UserQuota.incrementChecks(userId, 1);
 
     return res.json({
       success: true,
       exists: !!numberId
     });
-
   } catch (error) {
-    console.error('check-number error:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    return handleRouteError(res, error);
   }
 });
 
-
 router.post('/send-media', upload.single('file'), async (req, res) => {
   let uploadedFilePath = null;
-  
+
   try {
-    // Check if file was uploaded
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -162,13 +143,16 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
     uploadedFilePath = req.file.path;
     const { accountId, phoneNumbers, mediaType = 'document', caption = '' } = req.body;
     const userId = req.userId;
+    const trimmedId = String(accountId || '').trim();
 
-    // Validation
-    if (!accountId || typeof accountId !== 'string' || accountId.trim().length === 0) {
-      // Clean up uploaded file
+    const cleanup = () => {
       if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
         fs.unlinkSync(uploadedFilePath);
       }
+    };
+
+    if (!trimmedId) {
+      cleanup();
       return res.status(400).json({
         success: false,
         error: 'accountId is required and must be a non-empty string'
@@ -176,25 +160,18 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
     }
 
     if (!phoneNumbers || typeof phoneNumbers !== 'string') {
-      // Clean up uploaded file
-      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-        fs.unlinkSync(uploadedFilePath);
-      }
+      cleanup();
       return res.status(400).json({
         success: false,
         error: 'phoneNumbers is required and must be a JSON array string'
       });
     }
 
-    // Parse phoneNumbers JSON string
     let phoneNumbersArray;
     try {
       phoneNumbersArray = JSON.parse(phoneNumbers);
-    } catch (parseError) {
-      // Clean up uploaded file
-      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-        fs.unlinkSync(uploadedFilePath);
-      }
+    } catch {
+      cleanup();
       return res.status(400).json({
         success: false,
         error: 'phoneNumbers must be a valid JSON array. Example: ["1234567890@c.us"]'
@@ -202,65 +179,20 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
     }
 
     if (!Array.isArray(phoneNumbersArray) || phoneNumbersArray.length === 0) {
-      // Clean up uploaded file
-      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-        fs.unlinkSync(uploadedFilePath);
-      }
+      cleanup();
       return res.status(400).json({
         success: false,
         error: 'phoneNumbers must be a non-empty array'
       });
     }
 
-    // Validate mediaType
     const validMediaTypes = ['image', 'document', 'audio', 'video'];
     const finalMediaType = validMediaTypes.includes(mediaType) ? mediaType : 'document';
 
-    // Check if account exists for this user (in memory or database)
-    const account = whatsappService.getAccount(accountId.trim(), userId);
-    if (!account) {
-      // Check database if not in memory
-      const AccountModel = require('../models/Account');
-      const dbAccount = await AccountModel.findByAccountId(accountId.trim(), userId);
-      if (!dbAccount) {
-        // Clean up uploaded file
-        if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-        return res.status(404).json({
-          success: false,
-          error: `Account with ID "${accountId}" not found. Please create the account first.`
-        });
-      }
-      
-      // Account exists in database but not connected - check if it's ready
-      if (!dbAccount.is_ready) {
-        // Clean up uploaded file
-        if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-        return res.status(400).json({
-          success: false,
-          error: `Account "${accountId}" is not connected. Please connect the account by scanning the QR code first.`
-        });
-      }
-    } else {
-      // Account is in memory - check if it's ready
-      if (!account.isReady) {
-        // Clean up uploaded file
-        if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-        return res.status(400).json({
-          success: false,
-          error: `Account "${accountId}" is not ready. Please wait for connection.`
-        });
-      }
-    }
+    await whatsappService.ensureAccountReady(trimmedId, userId);
 
-    // Send media messages
     const results = await whatsappService.sendMediaMessages(
-      accountId.trim(),
+      trimmedId,
       userId,
       phoneNumbersArray,
       uploadedFilePath,
@@ -268,22 +200,14 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
       caption || ''
     );
 
-    // Count successes and failures
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.filter(r => !r.success).length;
 
-    // Clean up uploaded file after sending
-    if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
-      try {
-        fs.unlinkSync(uploadedFilePath);
-      } catch (unlinkError) {
-        console.error('Error deleting uploaded file:', unlinkError);
-      }
-    }
+    cleanup();
 
     res.json({
       success: true,
-      accountId: accountId.trim(),
+      accountId: trimmedId,
       total: phoneNumbersArray.length,
       successCount,
       failureCount,
@@ -292,9 +216,6 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
       results
     });
   } catch (error) {
-    console.error('Error sending media messages:', error);
-    
-    // Clean up uploaded file on error
     if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
       try {
         fs.unlinkSync(uploadedFilePath);
@@ -302,13 +223,8 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
         console.error('Error deleting uploaded file:', unlinkError);
       }
     }
-    
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error'
-    });
+    return handleRouteError(res, error);
   }
 });
 
 module.exports = router;
-

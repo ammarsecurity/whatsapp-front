@@ -73,6 +73,34 @@ class User {
   }
 
   /**
+   * Update username (must be unique)
+   */
+  static async updateUsername(userId, username) {
+    await pool.execute(
+      'UPDATE users SET username = ? WHERE id = ?',
+      [username, userId]
+    );
+  }
+
+  /**
+   * Update username and/or password
+   */
+  static async update(userId, { username, password }) {
+    if (username) {
+      await this.updateUsername(userId, username);
+    }
+    if (password) {
+      await this.updatePassword(userId, password);
+    }
+  }
+
+  static async usernameTakenByOther(username, excludeUserId) {
+    const existing = await this.findByUsername(username);
+    if (!existing) return false;
+    return existing.id !== excludeUserId;
+  }
+
+  /**
    * Get all users (without passwords)
    */
   static async findAll() {

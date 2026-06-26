@@ -2,7 +2,26 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const verifyToken = require('../middleware/auth');
 const { isAdminUser } = require('../middleware/requireAdmin');
+
+function signToken(user) {
+  return jwt.sign(
+    { userId: user.id, username: user.username },
+    process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+    { expiresIn: process.env.JWT_EXPIRES_IN || '360d' },
+  );
+}
+
+function userPayload(user) {
+  return {
+    id: user.id,
+    userId: user.id,
+    username: user.username,
+    role: isAdminUser(user) ? 'admin' : 'user',
+    isAdmin: isAdminUser(user),
+  };
+}
 
 /**
  * @swagger
@@ -88,49 +107,88 @@ const { isAdminUser } = require('../middleware/requireAdmin');
  *                   type: string
  */
 router.post('/register', async (req, res) => {
+  return res.status(403).json({
+    success: false,
+    error: 'Public registration is disabled. Contact an administrator to create an account.',
+  });
+});
+
+/**
+ * Update own username and/or password (requires current password).
+ */
+router.patch('/profile', verifyToken, async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const userId = req.userId;
+    const { currentPassword, username, password } = req.body;
 
-    // Validation
-    if (!username || typeof username !== 'string' || username.trim().length === 0) {
+    if (!currentPassword || typeof currentPassword !== 'string') {
       return res.status(400).json({
         success: false,
-        error: 'Username is required and must be a non-empty string'
+        error: 'currentPassword is required',
       });
     }
 
-    if (!password || typeof password !== 'string' || password.length < 6) {
+    const trimmedUsername =
+      username != null && typeof username === 'string' ? username.trim() : '';
+    const hasUsername = trimmedUsername.length > 0;
+    const hasPassword =
+      password != null && typeof password === 'string' && password.length > 0;
+
+    if (!hasUsername && !hasPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Password is required and must be at least 6 characters'
+        error: 'Provide username and/or password to update',
       });
     }
 
-    // Check if username exists
-    const usernameExists = await User.usernameExists(username.trim());
-    if (usernameExists) {
-      return res.status(409).json({
+    if (hasPassword && password.length < 6) {
+      return res.status(400).json({
         success: false,
-        error: 'Username already exists'
+        error: 'New password must be at least 6 characters',
       });
     }
 
-    // Create user
-    const user = await User.create(username.trim(), password);
+    const stored = await User.findByUsername(req.user.username);
+    if (!stored) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
-    res.status(201).json({
-      success: true,
-      message: 'User registered successfully',
-      user: {
-        id: user.id,
-        username: user.username
+    const valid = await User.validatePassword(currentPassword, stored.password);
+    if (!valid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect',
+      });
+    }
+
+    if (hasUsername && trimmedUsername !== req.user.username) {
+      if (await User.usernameTakenByOther(trimmedUsername, userId)) {
+        return res.status(409).json({
+          success: false,
+          error: 'Username already exists',
+        });
       }
+      await User.updateUsername(userId, trimmedUsername);
+    }
+
+    if (hasPassword) {
+      await User.updatePassword(userId, password);
+    }
+
+    const updated = await User.findById(userId);
+    const token = signToken({ id: updated.id, username: updated.username });
+
+    res.json({
+      success: true,
+      message: 'Profile updated',
+      token,
+      user: userPayload(updated),
     });
   } catch (error) {
-    console.error('Error registering user:', error);
+    console.error('Error updating profile:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error'
+      error: error.message || 'Internal server error',
     });
   }
 });
@@ -251,24 +309,13 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      { userId: user.id, username: user.username },
-      process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '360d' }
-    );
+    const token = signToken(user);
 
     res.json({
       success: true,
       message: 'Login successful',
       token,
-      user: {
-        id: user.id,
-        userId: user.id,
-        username: user.username,
-        role: isAdminUser(user) ? 'admin' : 'user',
-        isAdmin: isAdminUser(user),
-      },
+      user: userPayload(user),
     });
   } catch (error) {
     console.error('Error logging in:', error);

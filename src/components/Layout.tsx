@@ -1,24 +1,36 @@
 import {
+  FileText,
+  Inbox,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   MessageCircle,
   MessageSquare,
   Settings,
   Shield,
   Smartphone,
+  Users,
 } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { ApiHealthBanner } from './ApiHealthBanner'
+import { formatAccountLabel, accountStatusLabel, ACCOUNT_STATUS_STYLES } from '../lib/accountDisplay'
+import { useAccounts } from '../context/AccountContext'
 import { useAuth } from '../context/AuthContext'
 
 const baseNav = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/accounts', label: 'Accounts', icon: Smartphone },
+  { to: '/inbox', label: 'Inbox', icon: Inbox },
   { to: '/messages', label: 'Messages', icon: MessageSquare },
+  { to: '/contacts', label: 'Contacts', icon: Users },
+  { to: '/templates', label: 'Templates', icon: FileText },
+  { to: '/campaigns', label: 'Campaigns', icon: Megaphone },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export function Layout() {
   const { logout, user, isSuperAdmin } = useAuth()
+  const { selectedAccount, selectedAccountId, accounts, selectAccount } = useAccounts()
 
   const nav = isSuperAdmin
     ? [
@@ -26,6 +38,10 @@ export function Layout() {
         { to: '/admin', label: 'Admin', icon: Shield, end: false },
       ]
     : baseNav
+
+  const statusMeta = selectedAccount
+    ? accountStatusLabel(selectedAccount)
+    : null
 
   return (
     <div className="bg-app-pattern flex h-full min-h-0">
@@ -37,10 +53,36 @@ export function Layout() {
           <div>
             <p className="text-sm font-bold leading-tight">WA Console</p>
             <p className="text-[11px] text-muted">
-              {user?.username ?? 'API Dashboard'}
+              {user?.username ?? 'Dashboard'}
             </p>
           </div>
         </div>
+
+        {accounts.length > 0 && (
+          <div className="border-b border-border px-3 py-3">
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-muted">
+              Active WhatsApp
+            </label>
+            <select
+              value={selectedAccountId}
+              onChange={(e) => selectAccount(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface px-2 py-2 text-xs font-medium text-text outline-none focus:border-wa-green"
+            >
+              {accounts.map((acc) => (
+                <option key={acc.accountId} value={acc.accountId}>
+                  {formatAccountLabel(acc.accountId)}
+                </option>
+              ))}
+            </select>
+            {statusMeta && selectedAccountId && (
+              <span
+                className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${ACCOUNT_STATUS_STYLES[statusMeta.tone]}`}
+              >
+                {statusMeta.label}
+              </span>
+            )}
+          </div>
+        )}
 
         <nav className="flex-1 space-y-0.5 p-3">
           {nav.map(({ to, label, icon: Icon, end }) => (
@@ -75,6 +117,7 @@ export function Layout() {
       </aside>
 
       <main className="relative min-w-0 flex-1 overflow-y-auto p-6 md:p-8">
+        <ApiHealthBanner />
         <Outlet />
       </main>
     </div>

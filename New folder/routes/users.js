@@ -58,6 +58,69 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.patch('/:userId', async (req, res) => {
+  try {
+    const targetId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(targetId)) {
+      return res.status(400).json({ success: false, error: 'Invalid user ID' });
+    }
+
+    const { username, password } = req.body;
+    const trimmedUsername =
+      username != null && typeof username === 'string' ? username.trim() : '';
+    const hasUsername = trimmedUsername.length > 0;
+    const hasPassword =
+      password != null && typeof password === 'string' && password.length > 0;
+
+    if (!hasUsername && !hasPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Provide username and/or password to update',
+      });
+    }
+
+    if (hasPassword && password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'password must be at least 6 characters',
+      });
+    }
+
+    const existing = await User.findById(targetId);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    if (hasUsername && trimmedUsername !== existing.username) {
+      if (await User.usernameTakenByOther(trimmedUsername, targetId)) {
+        return res.status(409).json({ success: false, error: 'Username already exists' });
+      }
+    }
+
+    await User.update(targetId, {
+      username: hasUsername ? trimmedUsername : undefined,
+      password: hasPassword ? password : undefined,
+    });
+
+    const updated = await User.findById(targetId);
+    const admin = isAdminUser(updated);
+
+    res.json({
+      success: true,
+      message: 'User updated',
+      user: {
+        userId: updated.id,
+        username: updated.username,
+        role: admin ? 'admin' : 'user',
+        isAdmin: admin,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({ success: false, error: error.message || 'Internal server error' });
+  }
+});
+
 router.delete('/:userId', async (req, res) => {
   try {
     const targetId = parseInt(req.params.userId, 10);

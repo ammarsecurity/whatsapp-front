@@ -24,6 +24,8 @@ const CONNECTING_VALUES = new Set([
   'qr',
   'qrcode',
   'pending',
+  'initializing',
+  'authenticated',
 ])
 
 function norm(value: unknown): string {
@@ -41,7 +43,7 @@ function stateFromString(value: string): ConnectionState | null {
   if (CONNECTED_VALUES.has(value)) return 'connected'
   if (CONNECTING_VALUES.has(value)) return 'connecting'
   if (
-    ['disconnected', 'close', 'closed', 'offline', 'logout', 'unpaired'].includes(
+    ['disconnected', 'close', 'closed', 'offline', 'logout', 'unpaired', 'logged_out', 'failed'].includes(
       value,
     )
   ) {
@@ -140,4 +142,16 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
 
 export function isAccountConnected(data: unknown): boolean {
   return parseAccountStatus(data).state === 'connected'
+}
+
+/** True only when backend lifecycle status is exactly "ready". */
+export function isAccountReady(data: unknown): boolean {
+  const raw =
+    data && typeof data === 'object'
+      ? (data as Record<string, unknown>)
+      : {}
+  const status = String(raw.status ?? '').trim().toLowerCase()
+  if (status === 'ready') return true
+  if (status && status !== 'ready') return false
+  return isAccountConnected(data)
 }

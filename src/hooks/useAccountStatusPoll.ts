@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiClientError } from '../lib/api'
 import {
   parseAccountStatus,
+  isAccountReady,
   type ParsedAccountStatus,
 } from '../lib/accountStatus'
 
@@ -18,7 +19,7 @@ export function useAccountStatusPoll(accountId: string, enabled: boolean) {
       const parsed = parseAccountStatus(data)
       setStatus(parsed)
       setError(null)
-      return parsed
+      return { parsed, data }
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : 'Status check failed',
@@ -37,9 +38,9 @@ export function useAccountStatusPoll(accountId: string, enabled: boolean) {
     let intervalId: ReturnType<typeof setInterval> | undefined
 
     const tick = async () => {
-      const parsed = await fetchStatus()
-      if (!active || !parsed) return
-      if (parsed.state === 'connected') {
+      const result = await fetchStatus()
+      if (!active || !result) return
+      if (isAccountReady(result.data)) {
         setPolling(false)
         if (intervalId) clearInterval(intervalId)
       }
