@@ -16,6 +16,11 @@ const {
   isMessagingAllowed,
   isInitInProgress,
 } = require('../utils/accountLifecycle');
+const { withTimeout } = require('../utils/withTimeout');
+const { sendTextSafe } = require('../utils/waClientOps');
+
+const LIVE_STATE_TIMEOUT_MS = 12_000;
+const SEND_MESSAGE_TIMEOUT_MS = 45_000;
 
 const incomingHandler = require('./incomingHandler');
 const wsHub = require('./wsHub');
@@ -96,7 +101,6 @@ class WhatsAppService {
     if (!accountData) return;
     const prev = accountData.status;
     accountData.status = status;
-    accountData.lastState = status;
     if (prev !== status) {
       console.log(`[${accountId}] STATUS => ${status}`);
       const uid = accountData.userId;
@@ -184,14 +188,14 @@ class WhatsAppService {
       throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.INITIALIZING);
     }
 
-    const exists = await AccountModel.exists(trimmed, userId);
-    if (!exists) {
-      throw new Error(`Account with ID "${trimmed}" not found for this user`);
-    }
-
     let account = this.accounts.get(accountKey);
     if (!account) {
       throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
+    const exists = await AccountModel.exists(trimmed, userId);
+    if (!exists) {
+      throw new Error(`Account with ID "${trimmed}" not found for this user`);
     }
 
     const status = account.status || ACCOUNT_STATUSES.INITIALIZING;
@@ -201,6 +205,11 @@ class WhatsAppService {
 
     if (!account.client) {
       throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
+    // Skip client.info / getState when session is already ready (client.info can hang)
+    if (account.isReady && account.isConnected && status === ACCOUNT_STATUSES.READY) {
+      return account;
     }
 
     try {
@@ -214,6 +223,8 @@ class WhatsAppService {
       throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.FAILED);
     }
 
+    await this._assertLiveConnected(account, trimmed, userId);
+
     return account;
   }
 
@@ -223,7 +234,8 @@ class WhatsAppService {
       msg.includes('Target closed') ||
       msg.includes('detached Frame') ||
       msg.includes('Session closed') ||
-      msg.includes('Protocol error')
+      msg.includes('Protocol error') ||
+      msg.includes('timed out')
     ) {
       console.error(`[${accountId}] Protocol/session error (non-fatal):`, msg);
       const accountKey = this._getAccountKey(accountId, userId);
@@ -233,6 +245,36 @@ class WhatsAppService {
       this.accounts.delete(accountKey);
       this.initializingAccounts.delete(accountKey);
       AccountModel.updateStatus(accountId, userId, false, false).catch(() => {});
+    }
+  }
+
+  async _assertLiveConnected(account, accountId, userId) {
+    if (!account?.client) {
+      throw new AccountNotReadyError(accountId, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
+    try {
+      const liveState = await withTimeout(
+        account.client.getState(),
+        LIVE_STATE_TIMEOUT_MS,
+        'WhatsApp connection check',
+      );
+      account.lastState = liveState;
+
+      if (liveState !== 'CONNECTED') {
+        this._setAccountStatus(account, accountId, ACCOUNT_STATUSES.DISCONNECTED);
+        await AccountModel.updateStatus(accountId, userId, false, false);
+        throw new AccountNotReadyError(accountId, account.status);
+      }
+    } catch (err) {
+      if (err instanceof AccountNotReadyError) throw err;
+      this._handleClientProtocolError(account, accountId, userId, err);
+      throw new AccountNotReadyError(
+        accountId,
+        err.message?.includes('timed out')
+          ? ACCOUNT_STATUSES.FAILED
+          : ACCOUNT_STATUSES.DISCONNECTED,
+      );
     }
   }
 
@@ -854,31 +896,51 @@ class WhatsAppService {
     // Merge with in-memory accounts for real-time status
     const accountsMap = new Map();
 
-    // Add database accounts
+    // Add database accounts — never show ready if session is not in memory
     dbAccounts.forEach(dbAccount => {
       const accountKey = `${userId}_${dbAccount.account_id}`;
+      const mem = this.accounts.get(accountKey);
+      if (mem) {
         accountsMap.set(dbAccount.account_id, {
-        accountId: dbAccount.account_id,
-        userId: dbAccount.user_id,
-        status: dbAccount.is_ready ? ACCOUNT_STATUSES.DISCONNECTED : ACCOUNT_STATUSES.LOGGED_OUT,
-        isReady: dbAccount.is_ready,
-        isConnected: dbAccount.is_connected,
-        createdAt: dbAccount.created_at,
-        updatedAt: dbAccount.updated_at
-      });
-    });
-
-    // Update with in-memory status if account is active
-    this.accounts.forEach((account, accountKey) => {
-      if (account.userId === userId && accountsMap.has(account.accountId)) {
-        accountsMap.set(account.accountId, {
-          ...accountsMap.get(account.accountId),
-          status: account.status,
-          isReady: account.isReady,
-          isConnected: account.isConnected,
-          hasQrCode: !!account.qrCode
+          accountId: dbAccount.account_id,
+          userId: dbAccount.user_id,
+          status: mem.status,
+          isReady: mem.isReady,
+          isConnected: mem.isConnected,
+          hasQrCode: !!mem.qrCode,
+          createdAt: dbAccount.created_at,
+          updatedAt: dbAccount.updated_at,
+        });
+      } else {
+        accountsMap.set(dbAccount.account_id, {
+          accountId: dbAccount.account_id,
+          userId: dbAccount.user_id,
+          status: dbAccount.is_ready
+            ? ACCOUNT_STATUSES.DISCONNECTED
+            : ACCOUNT_STATUSES.LOGGED_OUT,
+          isReady: false,
+          isConnected: false,
+          createdAt: dbAccount.created_at,
+          updatedAt: dbAccount.updated_at,
         });
       }
+    });
+
+    // In-memory accounts missing from DB merge (edge case)
+    this.accounts.forEach((account) => {
+      if (account.userId !== userId || accountsMap.has(account.accountId)) {
+        return;
+      }
+      accountsMap.set(account.accountId, {
+        accountId: account.accountId,
+        userId: account.userId,
+        status: account.status,
+        isReady: account.isReady,
+        isConnected: account.isConnected,
+        hasQrCode: !!account.qrCode,
+        createdAt: account.createdAt,
+        updatedAt: null,
+      });
     });
 
     return Array.from(accountsMap.values());
@@ -931,6 +993,135 @@ class WhatsAppService {
     });
 
     return list;
+  }
+
+  _isStuckAccount(account) {
+    if (!account) return false;
+    return !(
+      account.status === ACCOUNT_STATUSES.READY && account.isReady === true
+    );
+  }
+
+  _collectStuckSessionsForUser(userId) {
+    const seen = new Set();
+    const items = [];
+
+    for (const account of this.accounts.values()) {
+      if (account.userId !== userId) continue;
+      const accountKey = this._getAccountKey(account.accountId, userId);
+      if (!this._isStuckAccount(account)) continue;
+      if (seen.has(accountKey)) continue;
+      seen.add(accountKey);
+      items.push({
+        accountId: account.accountId,
+        userId,
+        accountKey,
+        status: account.status,
+        liveState: account.lastState ?? null,
+      });
+    }
+
+    const prefix = `${userId}_`;
+    for (const accountKey of this.initializingAccounts) {
+      if (!accountKey.startsWith(prefix)) continue;
+      if (seen.has(accountKey)) continue;
+      seen.add(accountKey);
+      items.push({
+        accountId: accountKey.slice(prefix.length),
+        userId,
+        accountKey,
+        status: ACCOUNT_STATUSES.INITIALIZING,
+        liveState: null,
+      });
+    }
+
+    return items;
+  }
+
+  /**
+   * Stop and wipe in-memory sessions that are not ready (QR, pairing, failed, etc.).
+   * Ready accounts are left untouched.
+   */
+  async clearStuckSessions(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    const items = this._collectStuckSessionsForUser(userId);
+    const cleared = [];
+    const errors = [];
+
+    for (const item of items) {
+      try {
+        this.initializingAccounts.delete(item.accountKey);
+        this._clearReconnectTimer(item.accountKey);
+
+        const exists = await AccountModel.exists(item.accountId, userId);
+        if (exists) {
+          await this._clearSessionFiles(item.accountId, userId);
+        } else {
+          const account = this.accounts.get(item.accountKey);
+          if (account?.client) {
+            await this._safeDestroyClient(account.client, item.accountId);
+          }
+          this.accounts.delete(item.accountKey);
+        }
+
+        cleared.push({
+          accountId: item.accountId,
+          previousStatus: item.status,
+          liveState: item.liveState,
+        });
+      } catch (err) {
+        errors.push({
+          accountId: item.accountId,
+          error: err.message || String(err),
+        });
+      }
+    }
+
+    this._refreshGlobalReadyFlag();
+
+    return {
+      cleared,
+      errors,
+      clearedCount: cleared.length,
+      errorCount: errors.length,
+    };
+  }
+
+  /** Admin: clear stuck sessions for every user with in-memory activity. */
+  async clearAllStuckSessions() {
+    const userIds = new Set();
+
+    for (const account of this.accounts.values()) {
+      if (account.userId) userIds.add(account.userId);
+    }
+
+    for (const accountKey of this.initializingAccounts) {
+      const uid = parseInt(String(accountKey).split('_')[0], 10);
+      if (Number.isFinite(uid)) userIds.add(uid);
+    }
+
+    const cleared = [];
+    const errors = [];
+
+    for (const userId of userIds) {
+      const result = await this.clearStuckSessions(userId);
+      for (const row of result.cleared) {
+        cleared.push({ ...row, userId });
+      }
+      for (const row of result.errors) {
+        errors.push({ ...row, userId });
+      }
+    }
+
+    return {
+      cleared,
+      errors,
+      clearedCount: cleared.length,
+      errorCount: errors.length,
+    };
   }
 
   /**
@@ -1335,43 +1526,73 @@ class WhatsAppService {
     return account ? account.qrCode : null;
   }
 
+  async checkPhoneNumber(accountId, userId, phoneNumber) {
+    const accountKey = this._getAccountKey(accountId, userId);
+    const account = this.accounts.get(accountKey);
+    if (!account || !account.isReady || !isMessagingAllowed(account.status)) {
+      throw new AccountNotReadyError(
+        accountId,
+        account?.status ?? ACCOUNT_STATUSES.DISCONNECTED,
+      );
+    }
+    const { formattedNumber } = this._formatPhoneNumber(phoneNumber);
+    return { exists: true, jid: formattedNumber };
+  }
+
 
   async sendMessages(accountId, userId, phoneNumbers, message, options = {}) {
     const account = await this.ensureAccountReady(accountId, userId);
     const results = [];
     const delayBetween = Math.max(300, options.delayBetweenMs ?? 300);
+    const splitMessage = require('../utils/messageSplitter');
+    const logPrefix = `[${accountId}]`;
 
     for (let i = 0; i < phoneNumbers.length; i++) {
       const phone = phoneNumbers[i];
       try {
-        const { cleanedNumber, formattedNumber } = this._formatPhoneNumber(phone);
-        const splitMessage = require('../utils/messageSplitter');
+        const { cleanedNumber } = this._formatPhoneNumber(phone);
         const parts = splitMessage(message);
-
         let firstMsg = null;
 
         for (const part of parts) {
-          const sent = await account.client.sendMessage(formattedNumber, part);
-          if (!firstMsg) firstMsg = sent;
-          await new Promise(r => setTimeout(r, 300));
+          const sent = await sendTextSafe(account.client, phone, part, {
+            logPrefix,
+            timeoutMs: SEND_MESSAGE_TIMEOUT_MS,
+          });
+          if (!firstMsg) {
+            firstMsg = sent;
+          }
+          await new Promise((r) => setTimeout(r, 300));
         }
+
+        MessageModel.create({
+          accountId,
+          userId,
+          phoneNumber: `${cleanedNumber}@c.us`,
+          messageType: 'text',
+          messageText: message,
+          messageId: firstMsg?.id?._serialized || null,
+          status: 'sent',
+        }).catch(() => {});
 
         results.push({
           phone: cleanedNumber,
           success: true,
-          messageId: firstMsg?.id?._serialized || null
+          messageId: firstMsg?.id?._serialized || null,
         });
       } catch (err) {
         this._handleClientProtocolError(account, accountId, userId, err);
         results.push({
           phone,
           success: false,
-          error: err.message
+          error: err.message?.includes('timed out')
+            ? `${err.message}. Try Accounts → Clear stuck sessions, then link with QR again.`
+            : err.message,
         });
       }
 
       if (i < phoneNumbers.length - 1) {
-        await new Promise(r => setTimeout(r, delayBetween));
+        await new Promise((r) => setTimeout(r, delayBetween));
       }
     }
 
@@ -1401,9 +1622,13 @@ class WhatsAppService {
     try {
       const mime = this._getMimeType(filePath, mediaType);
       const media = MessageMedia.fromFilePath(filePath, mime);
-      const sent = await account.client.sendMessage(formattedNumber, media, {
-        caption: caption || undefined,
-      });
+      const sent = await withTimeout(
+        account.client.sendMessage(formattedNumber, media, {
+          caption: caption || undefined,
+        }),
+        SEND_MESSAGE_TIMEOUT_MS,
+        'WhatsApp media send',
+      );
 
       await MessageModel.updateStatus(messageRecordId, 'sent');
 

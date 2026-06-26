@@ -11,13 +11,23 @@ curl http://127.0.0.1:8489/health
 curl http://127.0.0.1:8489/
 ```
 
-Expected (v11+):
+Expected (v18+):
 
 ```json
-{"success":true,"apiBuild":"2026-06-02-v11","features":[...]}
+{"success":true,"apiBuild":"2026-06-02-v18","features":[...]}
 ```
 
-Root `/` must include `"apiBuild":"2026-06-02-v11"`.
+Root `/` must include `"apiBuild":"2026-06-02-v18"`.
+
+**Text send / check-number fix (v18):** requires `utils/waClientOps.js` (media-path first) and `utils/routeTimeout.js`. Upload at minimum:
+
+- `config/build.js`
+- `utils/waClientOps.js`
+- `utils/routeTimeout.js` (new file)
+- `routes/messages.js`
+- `services/whatsapp.js`
+
+Then `pm2 restart whatsapp-api` and verify `/health` shows v18.
 
 **If `/api/health` returns** `"Authorization header is required"` **→ old `middleware/auth.js` still running.**
 Upload new `server.js` + `middleware/verifyAuth.js` and restart pm2.
@@ -71,7 +81,15 @@ grep apiBuild config/build.js
 pm2 logs whatsapp-api --lines 20
 ```
 
-You must see `apiBuild 2026-06-02-v11` in logs and curl output.
+You must see `apiBuild 2026-06-02-v15` in logs and curl output.
+
+**nginx (recommended for text send timeouts):**
+
+```nginx
+proxy_read_timeout 120s;
+proxy_connect_timeout 30s;
+client_body_timeout 120s;
+```
 
 ---
 

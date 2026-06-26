@@ -41,6 +41,23 @@ router.get('/accounts', async (req, res) => {
   }
 });
 
+router.post('/clear-stuck-sessions', async (req, res) => {
+  try {
+    const result = await whatsappService.clearAllStuckSessions();
+    res.json({
+      success: true,
+      message:
+        result.clearedCount > 0
+          ? `Cleared ${result.clearedCount} stuck session(s) across all users.`
+          : 'No stuck sessions found — ready accounts were not changed.',
+      ...result,
+    });
+  } catch (err) {
+    console.error('ADMIN CLEAR STUCK SESSIONS:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/accounts/:userId/:accountId/status', async (req, res) => {
   try {
     const ids = parseIds(req);

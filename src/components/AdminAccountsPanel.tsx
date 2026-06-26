@@ -1,4 +1,5 @@
 import {
+  Eraser,
   Pause,
   QrCode,
   RefreshCw,
@@ -101,6 +102,22 @@ export function AdminAccountsPanel() {
     }
   }
 
+  async function handleClearAllStuck() {
+    const ok = await confirmDialog({
+      title: 'Clear all stuck sessions',
+      message:
+        'Stop and wipe every non-ready WhatsApp session on the server (all users)? Ready accounts will not be touched.',
+      confirmLabel: 'Clear all stuck',
+      variant: 'danger',
+    })
+    if (!ok) return
+    await runAction(
+      'clear-all-stuck',
+      () => api.adminClearStuckSessions(),
+      'Stuck sessions cleared',
+    )
+  }
+
   async function handleDisconnect(acc: AdminWaAccount) {
     const ok = await confirmDialog({
       title: 'Stop session',
@@ -192,6 +209,14 @@ export function AdminAccountsPanel() {
           <Button variant="secondary" loading={loading} onClick={load}>
             <RefreshCw className="h-4 w-4" />
             Refresh
+          </Button>
+          <Button
+            variant="danger"
+            loading={actionKey === 'clear-all-stuck'}
+            onClick={handleClearAllStuck}
+          >
+            <Eraser className="h-4 w-4" />
+            Clear stuck sessions
           </Button>
         </div>
 

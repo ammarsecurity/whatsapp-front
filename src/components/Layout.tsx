@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { ApiHealthBanner } from './ApiHealthBanner'
-import { formatAccountLabel, accountStatusLabel, ACCOUNT_STATUS_STYLES } from '../lib/accountDisplay'
+import { formatAccountLabel, liveStatusDisplayMeta, ACCOUNT_STATUS_STYLES } from '../lib/accountDisplay'
 import { useAccounts } from '../context/AccountContext'
 import { useAuth } from '../context/AuthContext'
 
@@ -30,7 +30,8 @@ const baseNav = [
 
 export function Layout() {
   const { logout, user, isSuperAdmin } = useAuth()
-  const { selectedAccount, selectedAccountId, accounts, selectAccount } = useAccounts()
+  const { selectedAccount, selectedAccountId, accounts, selectAccount, selectedLiveStatus } =
+    useAccounts()
 
   const nav = isSuperAdmin
     ? [
@@ -39,9 +40,10 @@ export function Layout() {
       ]
     : baseNav
 
-  const statusMeta = selectedAccount
-    ? accountStatusLabel(selectedAccount)
-    : null
+  const statusMeta = liveStatusDisplayMeta(
+    selectedLiveStatus,
+    selectedAccount ?? undefined,
+  )
 
   return (
     <div className="bg-app-pattern flex h-full min-h-0">

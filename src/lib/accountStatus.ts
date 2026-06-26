@@ -144,14 +144,18 @@ export function isAccountConnected(data: unknown): boolean {
   return parseAccountStatus(data).state === 'connected'
 }
 
-/** True only when backend lifecycle status is exactly "ready". */
+/** True only when backend lifecycle status is exactly "ready" and session is live. */
 export function isAccountReady(data: unknown): boolean {
   const raw =
     data && typeof data === 'object'
       ? (data as Record<string, unknown>)
       : {}
   const status = String(raw.status ?? '').trim().toLowerCase()
-  if (status === 'ready') return true
+  if (status === 'ready') {
+    if (raw.inMemory === false) return false
+    if (raw.sessionActive === false) return false
+    return true
+  }
   if (status && status !== 'ready') return false
   return isAccountConnected(data)
 }

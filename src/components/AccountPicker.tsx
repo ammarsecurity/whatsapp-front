@@ -4,6 +4,7 @@ import {
   ACCOUNT_STATUS_STYLES,
   accountStatusLabel,
   formatAccountLabel,
+  liveStatusDisplayMeta,
 } from '../lib/accountDisplay'
 import { useAccounts } from '../context/AccountContext'
 import { Button } from './ui/Button'
@@ -29,7 +30,15 @@ export function AccountPicker({
     selectAccount,
     loading,
     refreshAccounts,
+    selectedLiveStatus,
   } = useAccounts()
+
+  function metaForAccount(acc: (typeof accounts)[number]) {
+    if (acc.accountId === selectedAccountId) {
+      return liveStatusDisplayMeta(selectedLiveStatus, acc)
+    }
+    return accountStatusLabel(acc)
+  }
 
   if (loading && accounts.length === 0) {
     return (
@@ -60,7 +69,7 @@ export function AccountPicker({
   }
 
   const selected = accounts.find((a) => a.accountId === selectedAccountId)
-  const selectedMeta = selected ? accountStatusLabel(selected) : null
+  const selectedMeta = selected ? metaForAccount(selected) : null
 
   if (compact) {
     return (
@@ -73,7 +82,7 @@ export function AccountPicker({
             className="w-full appearance-none rounded-lg border border-border bg-panel py-2.5 pl-3 pr-10 text-sm font-medium text-text outline-none focus:border-wa-green"
           >
             {accounts.map((acc) => {
-              const meta = accountStatusLabel(acc)
+              const meta = metaForAccount(acc)
               return (
                 <option key={acc.accountId} value={acc.accountId}>
                   {formatAccountLabel(acc.accountId)} — {meta.label}
@@ -99,7 +108,7 @@ export function AccountPicker({
       <div className="grid gap-2 sm:grid-cols-2">
         {accounts.map((acc) => {
           const active = acc.accountId === selectedAccountId
-          const meta = accountStatusLabel(acc)
+          const meta = metaForAccount(acc)
           return (
             <button
               key={acc.accountId}

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Alert } from './ui/Alert'
 import { DEFAULT_API_URL, getApiUrl } from '../lib/storage'
 
-const MIN_API_BUILD = '2026-06-02-v10'
+const MIN_API_BUILD = '2026-06-02-v25'
 
 interface HealthResponse {
   success?: boolean
@@ -41,7 +41,7 @@ export function ApiHealthBanner() {
         if (data.apiBuild < MIN_API_BUILD) {
           if (!cancelled) {
             setIssue(
-              `Backend apiBuild is ${data.apiBuild}; need ${MIN_API_BUILD}+. Upload the latest backend and run migration_v10_features.sql.`,
+              `Backend apiBuild is ${data.apiBuild}; need ${MIN_API_BUILD}+ (text send fix). Upload the latest backend and run pm2 restart.`,
             )
           }
         }

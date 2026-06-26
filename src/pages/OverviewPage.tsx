@@ -1,26 +1,27 @@
 import { Activity, Radio } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { AccountPicker, SelectedAccountStatus } from '../components/AccountPicker'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { useAccounts } from '../context/AccountContext'
-import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { ApiClientError } from '../lib/api'
 import { formatAccountLabel } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
 import { Link } from 'react-router-dom'
 
 export function OverviewPage() {
-  const { selectedAccountId } = useAccounts()
+  const {
+    selectedAccountId,
+    selectedLiveStatus,
+    liveStatusPolling,
+    refreshSelectedLiveStatus,
+  } = useAccounts()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const { status: accountStatus, polling, refresh } = useAccountStatusPoll(
-    selectedAccountId,
-    !!selectedAccountId,
-  )
-
+  const accountStatus = selectedLiveStatus
+  const polling = liveStatusPolling
   const accountReady = isAccountReady(accountStatus?.raw)
   const displayName = selectedAccountId
     ? formatAccountLabel(selectedAccountId)
@@ -31,7 +32,7 @@ export function OverviewPage() {
     setLoading(true)
     setError(null)
     try {
-      await refresh()
+      await refreshSelectedLiveStatus()
     } catch (err) {
       setError(
         err instanceof ApiClientError ? err.message : 'Failed to load status',
@@ -39,11 +40,7 @@ export function OverviewPage() {
     } finally {
       setLoading(false)
     }
-  }, [selectedAccountId, refresh])
-
-  useEffect(() => {
-    refreshStatus()
-  }, [refreshStatus])
+  }, [selectedAccountId, refreshSelectedLiveStatus])
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

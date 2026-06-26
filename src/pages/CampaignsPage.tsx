@@ -10,7 +10,6 @@ import { Input } from '../components/ui/Input'
 import { Pagination, DEFAULT_PAGE_SIZE } from '../components/ui/Pagination'
 import { Textarea } from '../components/ui/Textarea'
 import { useAccounts } from '../context/AccountContext'
-import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api, ApiClientError } from '../lib/api'
 import { formatAccountLabel } from '../lib/accountDisplay'
@@ -20,7 +19,12 @@ import type { CampaignRecord, ContactGroup } from '../types/contacts'
 import type { MessageTemplate } from '../types/features'
 
 export function CampaignsPage() {
-  const { selectedAccountId } = useAccounts()
+  const {
+    selectedAccountId,
+    selectedLiveStatus,
+    liveStatusPolling,
+    refreshSelectedLiveStatus,
+  } = useAccounts()
   const [groups, setGroups] = useState<ContactGroup[]>([])
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([])
   const [groupId, setGroupId] = useState<number | ''>('')
@@ -48,10 +52,8 @@ export function CampaignsPage() {
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historyTotalPages, setHistoryTotalPages] = useState(1)
 
-  const { status: accountStatus, polling, refresh } = useAccountStatusPoll(
-    selectedAccountId,
-    !!selectedAccountId,
-  )
+  const accountStatus = selectedLiveStatus
+  const polling = liveStatusPolling
   const accountReady = isAccountReady(accountStatus?.raw)
 
   const selectedGroup = groups.find((g) => g.id === groupId) ?? null
@@ -193,7 +195,7 @@ export function CampaignsPage() {
                 </Link>
               </span>
             )}
-            <Button variant="ghost" onClick={() => refresh()}>
+            <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
               Refresh
             </Button>
           </div>

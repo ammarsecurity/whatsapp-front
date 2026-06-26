@@ -7,7 +7,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
+import { isAccountReady } from '../lib/accountStatus'
 import { getAccountId, setAccountId as persistAccountId } from '../lib/storage'
 import type { WaAccount } from '../types/models'
 import { useAuth } from './AuthContext'
@@ -16,6 +18,10 @@ interface AccountContextValue {
   accounts: WaAccount[]
   selectedAccountId: string
   selectedAccount: WaAccount | null
+  selectedLiveStatus: ReturnType<typeof useAccountStatusPoll>['status']
+  liveStatusPolling: boolean
+  liveStatusError: string | null
+  refreshSelectedLiveStatus: ReturnType<typeof useAccountStatusPoll>['refresh']
   loading: boolean
   error: string | null
   selectAccount: (accountId: string) => void
@@ -91,11 +97,49 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     [accounts, selectedAccountId],
   )
 
+  const {
+    status: selectedLiveStatus,
+    polling: liveStatusPolling,
+    error: liveStatusError,
+    refresh: refreshSelectedLiveStatus,
+  } = useAccountStatusPoll(
+    selectedAccountId,
+    isAuthenticated && !!selectedAccountId,
+  )
+
+  useEffect(() => {
+    if (!selectedAccountId || !selectedLiveStatus) return
+    const raw = selectedLiveStatus.raw
+    const ready = isAccountReady(raw)
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.accountId === selectedAccountId
+          ? {
+              ...a,
+              status: String(raw.status ?? a.status ?? ''),
+              isReady: ready,
+              ready,
+              isConnected:
+                ready ||
+                raw.connected === true ||
+                raw.isConnected === true,
+              liveState:
+                typeof raw.liveState === 'string' ? raw.liveState : a.liveState,
+            }
+          : a,
+      ),
+    )
+  }, [selectedLiveStatus, selectedAccountId])
+
   const value = useMemo(
     () => ({
       accounts,
       selectedAccountId,
       selectedAccount,
+      selectedLiveStatus,
+      liveStatusPolling,
+      liveStatusError,
+      refreshSelectedLiveStatus,
       loading,
       error,
       selectAccount,
@@ -105,6 +149,10 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       accounts,
       selectedAccountId,
       selectedAccount,
+      selectedLiveStatus,
+      liveStatusPolling,
+      liveStatusError,
+      refreshSelectedLiveStatus,
       loading,
       error,
       selectAccount,

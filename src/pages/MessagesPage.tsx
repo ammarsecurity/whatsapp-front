@@ -16,7 +16,6 @@ import { Input } from '../components/ui/Input'
 import { Pagination, DEFAULT_PAGE_SIZE } from '../components/ui/Pagination'
 import { Textarea } from '../components/ui/Textarea'
 import { useAccounts } from '../context/AccountContext'
-import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
 import { formatAccountLabel } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
@@ -25,8 +24,26 @@ import type { MessageRecord, MessageStatistics } from '../types/messages'
 type Tab = 'compose' | 'media' | 'history'
 type LoadingKey = 'check' | 'send' | 'media' | 'history' | null
 
+function formatMessageActionError(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiClientError)) {
+    return fallback
+  }
+  if (err.status === 408 || err.status === 504) {
+    return `${err.message} Go to Accounts → Clear stuck sessions, then scan QR again.`
+  }
+  if (err.status === 503) {
+    return `${err.message} Wait until the account shows Ready to send.`
+  }
+  return err.message
+}
+
 export function MessagesPage() {
-  const { selectedAccountId } = useAccounts()
+  const {
+    selectedAccountId,
+    selectedLiveStatus,
+    liveStatusPolling,
+    refreshSelectedLiveStatus,
+  } = useAccounts()
   const accountId = selectedAccountId
 
   const [tab, setTab] = useState<Tab>('compose')
@@ -54,8 +71,8 @@ export function MessagesPage() {
   const [error, setError] = useState<string | null>(null)
   const [showApiDetails, setShowApiDetails] = useState(false)
 
-  const { status: accountStatus, polling, refresh: refreshAccountStatus } =
-    useAccountStatusPoll(accountId, !!accountId)
+  const accountStatus = selectedLiveStatus
+  const polling = liveStatusPolling
   const accountReady = isAccountReady(accountStatus?.raw)
   const displayName = accountId ? formatAccountLabel(accountId) : ''
 
@@ -74,7 +91,7 @@ export function MessagesPage() {
       const data = await api.checkNumber({ accountId, phoneNumber })
       setCheckResult(data)
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Check failed')
+      setError(formatMessageActionError(err, 'Check failed'))
       setCheckResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
@@ -95,7 +112,7 @@ export function MessagesPage() {
       const data = await api.sendMessage({ accountId, message, phoneNumbers })
       setSendResult(data)
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Send failed')
+      setError(formatMessageActionError(err, 'Send failed'))
       setSendResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
@@ -201,7 +218,7 @@ export function MessagesPage() {
                 </Link>
               </p>
             )}
-            <Button variant="ghost" onClick={() => refreshAccountStatus()}>
+            <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
               Refresh status
             </Button>
           </div>
@@ -229,6 +246,14 @@ export function MessagesPage() {
       {error && (
         <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
           {error}
+          {(error.includes('timed out') || error.includes('stuck')) && (
+            <span>
+              {' '}
+              <Link to="/accounts" className="underline">
+                Open Accounts
+              </Link>
+            </span>
+          )}
         </Alert>
       )}
 

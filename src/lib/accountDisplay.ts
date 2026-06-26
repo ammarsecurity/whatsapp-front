@@ -1,3 +1,6 @@
+import type { ParsedAccountStatus } from './accountStatus'
+import { isAccountReady } from './accountStatus'
+
 /** Turn a friendly name into a valid account slug for the API. */
 export function slugifyAccountName(name: string): string {
   const slug = name
@@ -17,27 +20,78 @@ export function formatAccountLabel(accountId: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+export type AccountStatusMeta = {
+  label: string
+  tone: 'ready' | 'connecting' | 'offline' | 'unknown'
+}
+
 export function accountStatusLabel(acc: {
   status?: string
+  liveState?: string
   isReady?: boolean
   isConnected?: boolean
   ready?: boolean
   connected?: boolean
-}): { label: string; tone: 'ready' | 'connecting' | 'offline' | 'unknown' } {
+}): AccountStatusMeta {
   const status = String(acc.status ?? '').toLowerCase()
-  if (status === 'ready' || acc.isReady || acc.ready) {
+  const liveState = String(acc.liveState ?? '').toLowerCase()
+
+  if (status === 'ready') {
     return { label: 'Ready to send', tone: 'ready' }
   }
+
   if (['qr', 'loading', 'initializing', 'authenticated'].includes(status)) {
-    return { label: 'Connecting…', tone: 'connecting' }
+    return status === 'qr'
+      ? { label: 'Needs QR', tone: 'connecting' }
+      : { label: 'Connecting…', tone: 'connecting' }
   }
+
   if (['logged_out', 'failed', 'disconnected'].includes(status)) {
     return { label: 'Not linked', tone: 'offline' }
   }
+
+  if (
+    ['unpaired', 'unlaunched', 'close', 'closed', 'offline', 'logout'].includes(
+      liveState,
+    )
+  ) {
+    return { label: 'Not linked', tone: 'offline' }
+  }
+
+  if (acc.isReady || acc.ready) {
+    return { label: 'Ready to send', tone: 'ready' }
+  }
+
   if (acc.isConnected || acc.connected) {
     return { label: 'Connected', tone: 'ready' }
   }
+
   return { label: 'Not linked', tone: 'offline' }
+}
+
+/** Prefer live poll data; fall back to list entry when poll is unavailable. */
+export function liveStatusDisplayMeta(
+  live: ParsedAccountStatus | null,
+  fallback?: Parameters<typeof accountStatusLabel>[0],
+): AccountStatusMeta {
+  if (live) {
+    if (isAccountReady(live.raw)) {
+      return { label: 'Ready to send', tone: 'ready' }
+    }
+    if (live.state === 'connecting') {
+      const status = String(live.raw.status ?? '').toLowerCase()
+      if (status === 'qr') {
+        return { label: 'Needs QR', tone: 'connecting' }
+      }
+      return { label: 'Connecting…', tone: 'connecting' }
+    }
+    if (live.state === 'disconnected') {
+      return { label: 'Not linked', tone: 'offline' }
+    }
+    return { label: live.label, tone: 'unknown' }
+  }
+  if (fallback) return accountStatusLabel(fallback)
+  return { label: 'Unknown', tone: 'unknown' }
 }
 
 export const ACCOUNT_STATUS_STYLES = {

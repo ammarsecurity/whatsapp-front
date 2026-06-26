@@ -1,6 +1,7 @@
 export interface WaAccount {
   accountId: string
   status?: string
+  liveState?: string
   phone?: string
   isReady?: boolean
   isConnected?: boolean

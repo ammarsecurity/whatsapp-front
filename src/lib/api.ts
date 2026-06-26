@@ -42,6 +42,24 @@ import type { PaginatedResult } from './pagination'
 import { buildPaginated } from './pagination'
 import { getApiUrl, getToken } from './storage'
 
+export interface ClearStuckSessionsResponse {
+  success?: boolean
+  message?: string
+  clearedCount: number
+  errorCount: number
+  cleared: Array<{
+    accountId: string
+    previousStatus?: string
+    liveState?: string | null
+    userId?: number
+  }>
+  errors: Array<{
+    accountId: string
+    error: string
+    userId?: number
+  }>
+}
+
 export class ApiClientError extends Error {
   status: number
   body: unknown
@@ -72,6 +90,16 @@ function formatHttpErrorMessage(
       return 'Service temporarily unavailable — retry shortly'
     }
   }
+  if (status === 504) {
+    const body =
+      data && typeof data === 'object'
+        ? (data as Record<string, unknown>)
+        : null
+    if (typeof body?.hint === 'string' && body.hint.trim()) {
+      return `${msg}. ${body.hint}`
+    }
+    return msg || 'Request timed out on the server — try Clear stuck sessions'
+  }
   return msg
 }
 
@@ -79,6 +107,7 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
   auth = true,
+  timeoutMs = 120_000,
 ): Promise<T> {
   const base = getApiUrl()
   const headers: Record<string, string> = {
@@ -91,7 +120,28 @@ async function request<T>(
     if (token) headers.Authorization = token
   }
 
-  image.png
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  let res: Response
+  try {
+    res = await fetch(`${base}${path}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiClientError(
+        'Request timed out — WhatsApp may be stuck. Try Accounts → Clear stuck sessions.',
+        408,
+        null,
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 
   let data: unknown
   const text = await res.text()
@@ -113,6 +163,7 @@ async function requestForm<T>(
   path: string,
   form: FormData,
   auth = true,
+  timeoutMs = 180_000,
 ): Promise<T> {
   const base = getApiUrl()
   const headers: Record<string, string> = {}
@@ -122,7 +173,29 @@ async function requestForm<T>(
     if (token) headers.Authorization = token
   }
 
-  const res = await fetch(`${base}${path}`, { method: 'POST', headers, body: form })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  let res: Response
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers,
+      body: form,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiClientError(
+        'Upload timed out — WhatsApp may be stuck. Try Accounts → Clear stuck sessions.',
+        408,
+        null,
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 
   let data: unknown
   const text = await res.text()
@@ -249,6 +322,13 @@ export const api = {
     )
   },
 
+  clearStuckSessions() {
+    return request<ClearStuckSessionsResponse>(
+      '/api/accounts/clear-stuck-sessions',
+      { method: 'POST' },
+    )
+  },
+
   addAccount(body: AddAccountRequest) {
     return request<Record<string, unknown>>('/api/accounts', {
       method: 'POST',
@@ -269,17 +349,27 @@ export const api = {
   },
 
   checkNumber(body: CheckNumberRequest) {
-    return request<Record<string, unknown>>('/api/messages/check-number', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
+    return request<Record<string, unknown>>(
+      '/api/messages/check-number',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      true,
+      90_000,
+    )
   },
 
   sendMessage(body: SendMessageRequest) {
-    return request<Record<string, unknown>>('/api/messages/send', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
+    return request<Record<string, unknown>>(
+      '/api/messages/send',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      true,
+      90_000,
+    )
   },
 
   sendMedia(body: SendMediaRequest) {
@@ -351,6 +441,13 @@ export const api = {
   async listAllAccountsAdmin(): Promise<AdminWaAccount[]> {
     const data = await request<unknown>('/api/admin/accounts')
     return parseAdminAccountList(data)
+  },
+
+  adminClearStuckSessions() {
+    return request<ClearStuckSessionsResponse>(
+      '/api/admin/clear-stuck-sessions',
+      { method: 'POST' },
+    )
   },
 
   adminDisconnectAccount(userId: number, accountId: string) {
@@ -536,10 +633,15 @@ export const api = {
   },
 
   async sendCampaign(body: SendCampaignRequest): Promise<SendCampaignResult> {
-    const data = await request<Record<string, unknown>>('/api/campaigns/send', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
+    const data = await request<Record<string, unknown>>(
+      '/api/campaigns/send',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      true,
+      120_000,
+    )
     return {
       campaignId: Number(data.campaignId),
       total: Number(data.total ?? data.totalRecipients ?? 0),

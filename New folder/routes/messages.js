@@ -8,6 +8,10 @@ const UserQuota = require('../models/UserQuota');
 const { resolveMessage } = require('../utils/resolveMessage');
 const { AccountNotReadyError } = require('../utils/accountLifecycle');
 const { respondNotReady } = require('../middleware/accountReady');
+const { withRouteTimeout } = require('../utils/routeTimeout');
+const { withTimeout } = require('../utils/withTimeout');
+
+const ROUTE_TIMEOUT_MS = 55_000;
 
 const upload = multer({
   dest: 'uploads/',
@@ -28,6 +32,13 @@ function handleRouteError(res, error) {
   if (error instanceof AccountNotReadyError) {
     return respondNotReady(res, error);
   }
+  if (error.message?.includes('timed out')) {
+    return res.status(504).json({
+      success: false,
+      error: error.message,
+      hint: 'WhatsApp may be stuck. Use Accounts → Clear stuck sessions, then link with QR again.',
+    });
+  }
   if (error.message?.includes('not found')) {
     return res.status(404).json({ success: false, error: error.message });
   }
@@ -40,65 +51,81 @@ function handleRouteError(res, error) {
 
 router.post('/send', async (req, res) => {
   try {
-    const { accountId, phoneNumbers, message, templateId, templateName, templateVars } = req.body;
-    const userId = req.userId;
-    const trimmedId = String(accountId || '').trim();
+    await withRouteTimeout(ROUTE_TIMEOUT_MS, async () => {
+      const { accountId, phoneNumbers, message, templateId, templateName, templateVars } = req.body;
+      const userId = req.userId;
+      const trimmedId = String(accountId || '').trim();
 
-    if (!trimmedId) {
-      return res.status(400).json({
-        success: false,
-        error: 'accountId is required and must be a non-empty string'
+      if (!trimmedId) {
+        res.status(400).json({
+          success: false,
+          error: 'accountId is required and must be a non-empty string'
+        });
+        return;
+      }
+
+      if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'phoneNumbers is required and must be a non-empty array'
+        });
+        return;
+      }
+
+      let resolvedMessage;
+      try {
+        resolvedMessage = await resolveMessage(userId, {
+          message,
+          templateId,
+          templateName,
+          templateVars,
+        });
+      } catch (resolveErr) {
+        const code = resolveErr.status || 400;
+        res.status(code).json({ success: false, error: resolveErr.message });
+        return;
+      }
+
+      let quota = { ok: true };
+      try {
+        quota = await withTimeout(
+          UserQuota.checkMessageQuota(userId, phoneNumbers.length),
+          3_000,
+          'Quota check',
+        );
+      } catch (quotaErr) {
+        console.warn('Quota check skipped:', quotaErr.message);
+      }
+      if (!quota.ok) {
+        res.status(429).json({ success: false, error: quota.error, quota });
+        return;
+      }
+
+      const results = await whatsappService.sendMessages(
+        trimmedId,
+        userId,
+        phoneNumbers,
+        resolvedMessage,
+      );
+
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+
+      if (successCount > 0) {
+        UserQuota.incrementMessages(userId, successCount).catch((err) => {
+          console.warn('incrementMessages failed:', err.message);
+        });
+      }
+
+      res.json({
+        success: true,
+        accountId: trimmedId,
+        total: phoneNumbers.length,
+        successCount,
+        failureCount,
+        message: resolvedMessage,
+        results
       });
-    }
-
-    if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'phoneNumbers is required and must be a non-empty array'
-      });
-    }
-
-    let resolvedMessage;
-    try {
-      resolvedMessage = await resolveMessage(userId, {
-        message,
-        templateId,
-        templateName,
-        templateVars,
-      });
-    } catch (resolveErr) {
-      const code = resolveErr.status || 400;
-      return res.status(code).json({ success: false, error: resolveErr.message });
-    }
-
-    const quota = await UserQuota.checkMessageQuota(userId, phoneNumbers.length);
-    if (!quota.ok) {
-      return res.status(429).json({ success: false, error: quota.error, quota });
-    }
-
-    await whatsappService.ensureAccountReady(trimmedId, userId);
-    const results = await whatsappService.sendMessages(
-      trimmedId,
-      userId,
-      phoneNumbers,
-      resolvedMessage
-    );
-
-    const successCount = results.filter(r => r.success).length;
-    const failureCount = results.filter(r => !r.success).length;
-
-    if (successCount > 0) {
-      await UserQuota.incrementMessages(userId, successCount);
-    }
-
-    res.json({
-      success: true,
-      accountId: trimmedId,
-      total: phoneNumbers.length,
-      successCount,
-      failureCount,
-      message: resolvedMessage,
-      results
     });
   } catch (error) {
     return handleRouteError(res, error);
@@ -107,22 +134,30 @@ router.post('/send', async (req, res) => {
 
 router.post('/check-number', async (req, res) => {
   try {
-    const { accountId, phoneNumber } = req.body;
-    const userId = req.userId;
-    const trimmedId = String(accountId || '').trim();
+    await withRouteTimeout(ROUTE_TIMEOUT_MS, async () => {
+      const { accountId, phoneNumber } = req.body;
+      const userId = req.userId;
+      const trimmedId = String(accountId || '').trim();
 
-    if (!trimmedId || !phoneNumber) {
-      return res.status(400).json({ success: false, error: 'Missing data' });
-    }
+      if (!trimmedId || !phoneNumber) {
+        res.status(400).json({ success: false, error: 'Missing data' });
+        return;
+      }
 
-    const account = await whatsappService.ensureAccountReady(trimmedId, userId);
-    const numberId = await account.client.getNumberId(phoneNumber);
+      const { exists } = await whatsappService.checkPhoneNumber(
+        trimmedId,
+        userId,
+        phoneNumber,
+      );
 
-    await UserQuota.incrementChecks(userId, 1);
+      res.json({
+        success: true,
+        exists,
+      });
 
-    return res.json({
-      success: true,
-      exists: !!numberId
+      UserQuota.incrementChecks(userId, 1).catch((err) => {
+        console.warn('incrementChecks failed:', err.message);
+      });
     });
   } catch (error) {
     return handleRouteError(res, error);
@@ -188,8 +223,6 @@ router.post('/send-media', upload.single('file'), async (req, res) => {
 
     const validMediaTypes = ['image', 'document', 'audio', 'video'];
     const finalMediaType = validMediaTypes.includes(mediaType) ? mediaType : 'document';
-
-    await whatsappService.ensureAccountReady(trimmedId, userId);
 
     const results = await whatsappService.sendMediaMessages(
       trimmedId,

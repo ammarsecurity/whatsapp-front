@@ -187,6 +187,20 @@ export const DOC_SECTIONS: DocSection[] = [
         response: { success: true, disconnected: true },
       },
       {
+        id: 'clear-stuck-sessions',
+        method: 'POST',
+        path: '/api/accounts/clear-stuck-sessions',
+        title: 'Clear stuck sessions',
+        description:
+          'Stop and wipe all in-memory sessions that are not ready (QR, pairing, disconnected, failed). Ready accounts are untouched. Re-link with GET /qr afterward.',
+        auth: true,
+        response: {
+          success: true,
+          clearedCount: 1,
+          cleared: [{ accountId: 'work', previousStatus: 'qr' }],
+        },
+      },
+      {
         id: 'reset-session',
         method: 'POST',
         path: '/api/accounts/:accountId/reset-session',
@@ -867,6 +881,16 @@ export const DOC_SECTIONS: DocSection[] = [
             },
           ],
         },
+      },
+      {
+        id: 'admin-clear-stuck-sessions',
+        method: 'POST',
+        path: '/api/admin/clear-stuck-sessions',
+        title: 'Clear all stuck sessions',
+        description:
+          'Stop and wipe every non-ready in-memory session across all users. Ready accounts are untouched.',
+        auth: true,
+        response: { success: true, clearedCount: 2 },
       },
       {
         id: 'admin-disconnect',

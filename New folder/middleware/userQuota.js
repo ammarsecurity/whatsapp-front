@@ -1,4 +1,5 @@
 const UserQuota = require('../models/UserQuota');
+const { withTimeout } = require('../utils/withTimeout');
 
 function messageQuotaMiddleware(countFromBody = 1) {
   return async (req, res, next) => {
@@ -11,7 +12,16 @@ function messageQuotaMiddleware(countFromBody = 1) {
       } else if (req.body?.groupId) {
         count = 1;
       }
-      const check = await UserQuota.checkMessageQuota(req.userId, Math.max(1, count));
+      let check = { ok: true };
+      try {
+        check = await withTimeout(
+          UserQuota.checkMessageQuota(req.userId, Math.max(1, count)),
+          3_000,
+          'Message quota check',
+        );
+      } catch (quotaErr) {
+        console.warn('Message quota check skipped:', quotaErr.message);
+      }
       if (!check.ok) {
         return res.status(429).json({ success: false, error: check.error, quota: check });
       }
@@ -25,7 +35,16 @@ function messageQuotaMiddleware(countFromBody = 1) {
 
 async function checkNumberQuota(req, res, next) {
   try {
-    const check = await UserQuota.checkNumberQuota(req.userId, 1);
+    let check = { ok: true };
+    try {
+      check = await withTimeout(
+        UserQuota.checkNumberQuota(req.userId, 1),
+        3_000,
+        'Check-number quota',
+      );
+    } catch (quotaErr) {
+      console.warn('Check-number quota skipped:', quotaErr.message);
+    }
     if (!check.ok) {
       return res.status(429).json({ success: false, error: check.error, quota: check });
     }

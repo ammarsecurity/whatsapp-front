@@ -1,4 +1,4 @@
-import { QrCode, UserPlus } from 'lucide-react'
+import { Eraser, QrCode, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { AccountPicker } from '../components/AccountPicker'
 import { ConnectionBadge } from '../components/ConnectionBadge'
@@ -9,7 +9,6 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAccounts } from '../context/AccountContext'
-import { useAccountStatusPoll } from '../hooks/useAccountStatusPoll'
 import { api, ApiClientError } from '../lib/api'
 import { formatAccountLabel, slugifyAccountName } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
@@ -21,6 +20,10 @@ export function AccountsPage() {
     selectedAccountId,
     selectAccount,
     refreshAccounts,
+    selectedLiveStatus,
+    liveStatusPolling,
+    liveStatusError,
+    refreshSelectedLiveStatus,
   } = useAccounts()
 
   const [newAccountName, setNewAccountName] = useState('')
@@ -32,8 +35,10 @@ export function AccountsPage() {
   const [watchConnection, setWatchConnection] = useState(false)
   const [showTechnical, setShowTechnical] = useState(false)
 
-  const { status: linkStatus, polling: statusPolling, error: statusError, refresh: refreshLinkStatus } =
-    useAccountStatusPoll(selectedAccountId, watchConnection && !!selectedAccountId)
+  const linkStatus = selectedLiveStatus
+  const statusPolling = liveStatusPolling
+  const statusError = liveStatusError
+  const refreshLinkStatus = refreshSelectedLiveStatus
 
   const accountReady = isAccountReady(linkStatus?.raw)
   const isLinked =
@@ -103,6 +108,31 @@ export function AccountsPage() {
     })
   }
 
+  async function clearStuckSessions() {
+    const ok = await confirmDialog({
+      title: 'Clear stuck sessions',
+      message:
+        'Stop and remove all pending WhatsApp sessions (QR, pairing, disconnected) that are not ready to send? Ready accounts will not be affected. You can link again with QR afterward.',
+      confirmLabel: 'Clear stuck sessions',
+      variant: 'danger',
+    })
+    if (!ok) return
+    await run('clear-stuck', () => api.clearStuckSessions(), async (data) => {
+      const result = data as { clearedCount?: number; message?: string }
+      setSuccess(
+        result.message ??
+          (result.clearedCount
+            ? `Cleared ${result.clearedCount} stuck session(s).`
+            : 'No stuck sessions found.'),
+      )
+      setQrData(null)
+      setQrImage(null)
+      setWatchConnection(false)
+      await refreshAccounts()
+      await refreshLinkStatus()
+    })
+  }
+
   async function deleteSelectedAccount() {
     if (!selectedAccountId) return
     const ok = await confirmDialog({
@@ -163,6 +193,21 @@ export function AccountsPage() {
 
       <Card title="Your accounts">
         <AccountPicker showStatus={false} />
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
+          <p className="min-w-[200px] flex-1 text-sm text-muted">
+            If an account shows the wrong status or send/check hangs, clear stuck
+            sessions on the server (QR, pairing, disconnected). Ready accounts stay
+            connected.
+          </p>
+          <Button
+            variant="secondary"
+            loading={loading === 'clear-stuck'}
+            onClick={clearStuckSessions}
+          >
+            <Eraser className="h-4 w-4" />
+            Clear stuck sessions
+          </Button>
+        </div>
       </Card>
 
       <Card
