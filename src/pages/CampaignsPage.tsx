@@ -147,6 +147,10 @@ export function CampaignsPage() {
       })
       if (result.scheduled) {
         setSuccess(`Campaign scheduled for ${new Date(result.scheduledAt || scheduledAt).toLocaleString()}`)
+      } else if (result.started) {
+        setSuccess(
+          `Campaign started — sending to ${result.total} contact(s). Progress updates live below.`,
+        )
       } else {
         setLastResult(result)
         setSuccess(

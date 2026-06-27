@@ -650,6 +650,8 @@ export const api = {
       scheduled: !!data.scheduled,
       scheduledAt: data.scheduledAt != null ? String(data.scheduledAt) : undefined,
       skippedOptOut: data.skippedOptOut != null ? Number(data.skippedOptOut) : undefined,
+      started: !!data.started,
+      status: data.status != null ? String(data.status) : undefined,
       results: Array.isArray(data.results)
         ? (data.results as SendCampaignResult['results'])
         : undefined,

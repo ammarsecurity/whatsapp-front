@@ -53,5 +53,7 @@ export interface SendCampaignResult {
   scheduled?: boolean
   scheduledAt?: string
   skippedOptOut?: number
+  started?: boolean
+  status?: string
   results?: Array<{ phone: string; success: boolean; error?: string }>
 }

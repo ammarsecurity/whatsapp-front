@@ -268,7 +268,13 @@ router.post('/send', async (req, res) => {
 
 
 
-    const result = await campaignRunner.runCampaign(req.userId, req.body);
+    const result = await campaignRunner.runCampaign(req.userId, req.body, {
+      background: !scheduledAt,
+    });
+
+    if (result.started) {
+      return res.status(202).json({ success: true, ...result });
+    }
 
     res.json({ success: true, ...result });
 

@@ -7,6 +7,12 @@ const whatsappService = require('./whatsapp');
 const { resolveMessage } = require('../utils/resolveMessage');
 const webhookDispatcher = require('./webhookDispatcher');
 const wsHub = require('./wsHub');
+const { withTimeout } = require('../utils/withTimeout');
+const {
+  ACCOUNT_STATUSES,
+  AccountNotReadyError,
+  isMessagingAllowed,
+} = require('../utils/accountLifecycle');
 
 async function resolveRecipients(userId, { groupId, phoneNumbers }) {
   let recipients = [];
@@ -35,10 +41,110 @@ async function resolveRecipients(userId, { groupId, phoneNumbers }) {
   return { recipients: [...new Set(recipients)], groupIdNum, groupName };
 }
 
+function assertSessionReady(accountId, userId) {
+  const accountKey = `${userId}_${accountId}`;
+  const account = whatsappService.accounts.get(accountKey);
+  if (!account || !account.isReady || !isMessagingAllowed(account.status)) {
+    throw new AccountNotReadyError(
+      accountId,
+      account?.status ?? ACCOUNT_STATUSES.DISCONNECTED,
+    );
+  }
+  return account;
+}
+
+async function executeCampaignSend({
+  userId,
+  trimmedId,
+  campaignId,
+  campaignName,
+  groupIdNum,
+  unique,
+  toSend,
+  skippedOptOut,
+  messageText,
+  delay,
+}) {
+  const recipientLogs = skippedOptOut.map((phone) => ({
+    phone,
+    status: 'skipped_opt_out',
+    error: 'Opted out',
+  }));
+
+  let results = [];
+  try {
+    if (toSend.length > 0) {
+      results = await whatsappService.sendMessages(
+        trimmedId,
+        userId,
+        toSend,
+        messageText,
+        { delayBetweenMs: delay },
+      );
+      UserQuota.incrementMessages(userId, results.filter((r) => r.success).length).catch(
+        (err) => console.warn('incrementMessages failed:', err.message),
+      );
+    }
+
+    for (const r of results) {
+      recipientLogs.push({
+        phone: r.phone,
+        status: r.success ? 'sent' : 'failed',
+        error: r.error || null,
+      });
+    }
+
+    await CampaignRecipient.bulkInsert(campaignId, recipientLogs);
+
+    const successCount = results.filter((r) => r.success).length;
+    const failureCount = results.filter((r) => !r.success).length;
+    const finalStatus =
+      failureCount === unique.length && successCount === 0 ? 'failed' : 'completed';
+
+    await Campaign.complete(campaignId, {
+      successCount,
+      failureCount: failureCount + skippedOptOut.length,
+      status: finalStatus,
+    });
+
+    const payload = {
+      campaignId,
+      name: campaignName,
+      accountId: trimmedId,
+      groupId: groupIdNum,
+      total: unique.length,
+      successCount,
+      failureCount: failureCount + skippedOptOut.length,
+      skippedOptOut: skippedOptOut.length,
+      delayMs: delay,
+    };
+
+    wsHub.broadcast(userId, 'campaign.completed', payload);
+    webhookDispatcher.dispatch(
+      userId,
+      finalStatus === 'failed' ? 'campaign.failed' : 'campaign.completed',
+      payload,
+    );
+
+    return { ...payload, results, skippedOptOut: skippedOptOut.length };
+  } catch (sendErr) {
+    await Campaign.complete(campaignId, {
+      successCount: 0,
+      failureCount: unique.length,
+      status: 'failed',
+    });
+    webhookDispatcher.dispatch(userId, 'campaign.failed', {
+      campaignId,
+      error: sendErr.message,
+    });
+    throw sendErr;
+  }
+}
+
 /**
- * Run campaign immediately (sync send loop)
+ * Run campaign — returns immediately when background=true; sends via WebSocket updates.
  */
-async function runCampaign(userId, params) {
+async function runCampaign(userId, params, { background = false } = {}) {
   let {
     accountId,
     groupId,
@@ -99,7 +205,16 @@ async function runCampaign(userId, params) {
   const toSend = unique.filter((p) => !optOutSet.has(p));
   const skippedOptOut = unique.filter((p) => optOutSet.has(p));
 
-  const quota = await UserQuota.checkMessageQuota(userId, toSend.length);
+  let quota = { ok: true };
+  try {
+    quota = await withTimeout(
+      UserQuota.checkMessageQuota(userId, toSend.length),
+      3_000,
+      'Campaign quota check',
+    );
+  } catch (quotaErr) {
+    console.warn('Campaign quota check skipped:', quotaErr.message);
+  }
   if (!quota.ok) {
     const err = new Error(quota.error);
     err.status = 429;
@@ -111,7 +226,7 @@ async function runCampaign(userId, params) {
     String(name || '').trim() ||
     (groupName ? `Campaign — ${groupName}` : `Campaign ${new Date().toLocaleDateString()}`);
 
-  await whatsappService.ensureAccountReady(trimmedId, userId);
+  assertSessionReady(trimmedId, userId);
 
   let campaignId = existingId;
   if (!campaignId) {
@@ -129,79 +244,48 @@ async function runCampaign(userId, params) {
   } else {
     await Campaign.updateStatus(campaignId, 'running');
   }
+
   wsHub.broadcast(userId, 'campaign.started', {
     campaignId,
     name: campaignName,
     total: unique.length,
   });
 
-  const recipientLogs = skippedOptOut.map((phone) => ({
-    phone,
-    status: 'skipped_opt_out',
-    error: 'Opted out',
-  }));
+  const sendParams = {
+    userId,
+    trimmedId,
+    campaignId,
+    campaignName,
+    groupIdNum,
+    unique,
+    toSend,
+    skippedOptOut,
+    messageText,
+    delay,
+  };
 
-  let results = [];
-  try {
-    if (toSend.length > 0) {
-      results = await whatsappService.sendMessages(
-        trimmedId,
-        userId,
-        toSend,
-        messageText,
-        { delayBetweenMs: delay },
-      );
-      await UserQuota.incrementMessages(userId, results.filter((r) => r.success).length);
-    }
-
-    for (const r of results) {
-      recipientLogs.push({
-        phone: r.phone,
-        status: r.success ? 'sent' : 'failed',
-        error: r.error || null,
+  if (background) {
+    setImmediate(() => {
+      executeCampaignSend(sendParams).catch((err) => {
+        console.error(`[campaign ${campaignId}] background send failed:`, err.message);
       });
-    }
-
-    await CampaignRecipient.bulkInsert(campaignId, recipientLogs);
-
-    const successCount = results.filter((r) => r.success).length;
-    const failureCount = results.filter((r) => !r.success).length;
-    const finalStatus = failureCount === unique.length && successCount === 0 ? 'failed' : 'completed';
-
-    await Campaign.complete(campaignId, {
-      successCount,
-      failureCount: failureCount + skippedOptOut.length,
-      status: finalStatus,
     });
-
-    const payload = {
+    return {
       campaignId,
       name: campaignName,
       accountId: trimmedId,
       groupId: groupIdNum,
       total: unique.length,
-      successCount,
-      failureCount: failureCount + skippedOptOut.length,
+      successCount: 0,
+      failureCount: 0,
       skippedOptOut: skippedOptOut.length,
       delayMs: delay,
+      status: 'running',
+      started: true,
     };
-
-    wsHub.broadcast(userId, 'campaign.completed', payload);
-    webhookDispatcher.dispatch(userId, finalStatus === 'failed' ? 'campaign.failed' : 'campaign.completed', payload);
-
-    return { ...payload, results, skippedOptOut: skippedOptOut.length };
-  } catch (sendErr) {
-    await Campaign.complete(campaignId, {
-      successCount: 0,
-      failureCount: unique.length,
-      status: 'failed',
-    });
-    webhookDispatcher.dispatch(userId, 'campaign.failed', {
-      campaignId,
-      error: sendErr.message,
-    });
-    throw sendErr;
   }
+
+  return executeCampaignSend(sendParams);
 }
 
 /**
