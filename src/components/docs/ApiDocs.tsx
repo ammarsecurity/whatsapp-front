@@ -12,6 +12,53 @@ import { DEFAULT_API_URL, getApiUrl } from '../../lib/storage'
 import { EndpointDoc } from './EndpointDoc'
 import { CodeBlock } from './CodeBlock'
 
+const SECTION_TITLES_AR: Record<string, string> = {
+  intro: 'مقدمة',
+  'instance-api': 'إرسال بالمفتاح',
+  auth: 'المصادقة',
+  system: 'النظام',
+  accounts: 'الحسابات',
+  messages: 'الرسائل',
+  contacts: 'جهات الاتصال',
+  campaigns: 'الحملات',
+  templates: 'قوالب الرسائل',
+  'opt-out': 'إلغاء الاشتراك',
+  'auto-replies': 'الردود التلقائية',
+  integrations: 'الربط والمفاتيح',
+  realtime: 'الاتصال اللحظي',
+  'admin-health': 'الإدارة — صحة النظام',
+  'admin-accounts': 'الإدارة — حسابات واتساب',
+  admin: 'الإدارة — المستخدمون',
+  errors: 'الأخطاء والاتفاقيات',
+}
+
+const ERROR_AR: Record<string, { title: string; detail: string }> = {
+  '401': {
+    title: 'غير مصرّح',
+    detail: 'رمز JWT أو مفتاح API ناقص أو غير صالح. أعد تسجيل الدخول أو راجع ترويسة X-API-Key.',
+  },
+  '404': {
+    title: 'غير موجود',
+    detail: 'المسار أو المورد غير موجود. إذا كانت المسارات الجديدة كلها 404، أعد نشر الخلفية وأعد تشغيل الخدمة.',
+  },
+  '429': {
+    title: 'تجاوز الحد / الحصة',
+    detail: 'تجاوزت الحصة اليومية للرسائل أو التحقق من الأرقام. راجع GET /api/integrations/quota.',
+  },
+  '503': {
+    title: 'الحساب غير جاهز',
+    detail: 'حساب واتساب غير مرتبط أو ما زال يبدأ. راقب GET /api/accounts/:id/status.',
+  },
+  '4xx/5xx': {
+    title: 'شكل الخطأ',
+    detail: 'معظم الأخطاء تعيد JSON: { "success": false, "error": "..." }',
+  },
+}
+
+function sectionTitle(id: string, fallback: string) {
+  return SECTION_TITLES_AR[id] ?? fallback
+}
+
 export function ApiDocs() {
   const { isSuperAdmin } = useAuth()
   const docSections = useMemo(
@@ -21,12 +68,12 @@ export function ApiDocs() {
 
   const navItems = useMemo(
     () => [
-      { id: 'intro', title: 'Introduction' },
-      { id: 'quickstart', title: 'Quick start' },
-      { id: 'headers', title: 'Headers' },
+      { id: 'intro', title: 'مقدمة' },
+      { id: 'quickstart', title: 'البدء السريع' },
+      { id: 'headers', title: 'الترويسات' },
       ...docSections.filter((s) => s.id !== 'intro').map((s) => ({
         id: s.id,
-        title: s.title,
+        title: sectionTitle(s.id, s.title),
         endpoints: s.endpoints,
       })),
     ],
@@ -63,18 +110,18 @@ export function ApiDocs() {
       <nav className="lg:sticky lg:top-6 lg:w-52 lg:shrink-0">
         <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted">
           <BookOpen className="h-3.5 w-3.5" />
-          On this page
+          في هذه الصفحة
         </p>
-        <ul className="space-y-0.5 rounded-xl border border-border bg-panel p-2 text-sm">
+        <ul className="space-y-1 rounded-[16px] bg-white p-2 text-[15px] shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
           {navItems.map((section) => (
             <li key={section.id}>
               <button
                 type="button"
                 onClick={() => scrollTo(section.id)}
-                className={`w-full rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                className={`w-full rounded-[14px] px-3 py-2 text-start transition-colors ${
                   activeSection === section.id
-                    ? 'bg-wa-green/15 font-medium text-wa-green'
-                    : 'text-muted hover:bg-card/60 hover:text-text'
+                    ? 'bg-primary-50 font-semibold text-primary-700'
+                    : 'text-muted hover:bg-slate-50 hover:text-text'
                 }`}
               >
                 {section.title}
@@ -105,23 +152,21 @@ export function ApiDocs() {
         <section
           id="intro"
           data-doc-section
-          className="scroll-mt-24 rounded-xl border border-border bg-gradient-to-br from-wa-teal/20 to-transparent p-6"
+          className="scroll-mt-24 rounded-[16px] bg-white p-6 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]"
         >
-          <h2 className="text-xl font-bold text-text">WhatsApp API</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-            Developer reference for the WhatsApp messaging backend: accounts,
-            messages, contact groups, campaigns, templates, inbox, auto-replies,
-            webhooks, API keys, and WebSocket events.
+          <h2 className="text-xl font-bold text-text">واجهة واتساب البرمجية</h2>
+          <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-muted">
+            مرجع للمطورين: ربط الحسابات، الرسائل الصادرة والواردة، مجموعات جهات الاتصال، الحملات، القوالب، الوارد، الردود التلقائية، الويب هوك، مفاتيح API، وأحداث WebSocket.
             {!isSuperAdmin && (
-              <> Admin-only endpoints are hidden from this view.</>
+              <> مسارات الإدارة مخفية في هذا العرض.</>
             )}
           </p>
-          <div className="mt-4 flex flex-wrap gap-3 text-xs">
-            <span className="rounded-full border border-border bg-panel px-3 py-1 text-muted">
-              Version {API_VERSION}
+          <div className="mt-4 flex flex-wrap gap-3 text-[13px]">
+            <span className="rounded-full bg-slate-50 px-3 py-1 text-muted">
+              الإصدار {API_VERSION}
             </span>
-            <span className="rounded-full border border-border bg-panel px-3 py-1 text-muted">
-              Build {API_BUILD}
+            <span className="rounded-full bg-slate-50 px-3 py-1 text-muted">
+              البناء {API_BUILD}
             </span>
             <span className="rounded-full border border-border bg-panel px-3 py-1 font-mono text-wa-green">
               {baseUrl || DEFAULT_API_URL}
@@ -136,7 +181,7 @@ export function ApiDocs() {
         >
           <h2 className="flex items-center gap-2 text-lg font-bold text-text">
             <Zap className="h-5 w-5 text-wa-green" />
-            Quick start
+            البدء السريع
           </h2>
           <ol className="space-y-2 rounded-xl border border-border bg-panel p-4 text-sm text-muted">
             {DOC_QUICK_START.map((step, i) => (
@@ -157,7 +202,7 @@ export function ApiDocs() {
         >
           <h2 className="flex items-center gap-2 text-lg font-bold text-text">
             <Key className="h-5 w-5 text-wa-green" />
-            Headers
+            الترويسات
           </h2>
           <CodeBlock
             language="http"
@@ -182,7 +227,7 @@ GET ${baseUrl || DEFAULT_API_URL}/health`}
             className="scroll-mt-24 space-y-4"
           >
             <div>
-              <h2 className="text-lg font-bold text-text">{section.title}</h2>
+              <h2 className="text-lg font-bold text-text">{sectionTitle(section.id, section.title)}</h2>
               {section.description && (
                 <p className="mt-1 text-sm text-muted">{section.description}</p>
               )}
@@ -199,9 +244,13 @@ GET ${baseUrl || DEFAULT_API_URL}/health`}
                       <span className="font-mono text-sm font-bold text-red-400">
                         {err.code}
                       </span>
-                      <span className="font-medium text-text">{err.title}</span>
+                      <span className="font-medium text-text">
+                        {ERROR_AR[err.code]?.title ?? err.title}
+                      </span>
                     </div>
-                    <p className="mt-1 text-sm text-muted">{err.detail}</p>
+                    <p className="mt-1 text-sm text-muted">
+                      {ERROR_AR[err.code]?.detail ?? err.detail}
+                    </p>
                   </div>
                 ))}
               </div>

@@ -48,6 +48,8 @@ export interface ApiKeyRecord {
   id: number
   name: string
   keyPrefix: string
+  accountId?: string | null
+  token?: string | null
   lastUsedAt?: string | null
   expiresAt?: string | null
   createdAt?: string

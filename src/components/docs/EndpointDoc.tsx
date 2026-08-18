@@ -52,23 +52,23 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
               : 'bg-border/60 text-muted'
           }`}
         >
-          {endpoint.auth ? 'Auth required' : 'Public'}
+          {endpoint.auth ? 'يتطلب مصادقة' : 'عام'}
         </span>
       </div>
 
       {endpoint.params && endpoint.params.length > 0 && (
         <div className="mt-4">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-            Parameters
+            المعاملات
           </h4>
           <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-left text-sm">
+            <table className="w-full text-start text-sm">
               <thead>
                 <tr className="border-b border-border bg-panel text-xs text-muted">
-                  <th className="px-3 py-2 font-medium">Name</th>
-                  <th className="px-3 py-2 font-medium">Type</th>
-                  <th className="px-3 py-2 font-medium">Required</th>
-                  <th className="px-3 py-2 font-medium">Description</th>
+                  <th className="px-3 py-2 font-medium">الاسم</th>
+                  <th className="px-3 py-2 font-medium">النوع</th>
+                  <th className="px-3 py-2 font-medium">مطلوب</th>
+                  <th className="px-3 py-2 font-medium">الوصف</th>
                 </tr>
               </thead>
               <tbody>
@@ -82,7 +82,7 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
                     </td>
                     <td className="px-3 py-2 text-muted">{p.type}</td>
                     <td className="px-3 py-2 text-muted">
-                      {p.required ? 'Yes' : 'No'}
+                      {p.required ? 'نعم' : 'لا'}
                     </td>
                     <td className="px-3 py-2 text-muted">{p.description}</td>
                   </tr>
@@ -96,7 +96,7 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
       {endpoint.body && (
         <div className="mt-4">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-            Request body
+            جسم الطلب
           </h4>
           <CodeBlock code={JSON.stringify(endpoint.body, null, 2)} />
         </div>
@@ -105,7 +105,7 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
       {endpoint.response && (
         <div className="mt-4">
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-            Example response
+            مثال الاستجابة
           </h4>
           <CodeBlock code={JSON.stringify(endpoint.response, null, 2)} />
         </div>
@@ -113,7 +113,7 @@ export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
 
       <div className="mt-4">
         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-          cURL example
+          مثال cURL
         </h4>
         <CodeBlock code={buildCurl(endpoint, base)} language="bash" />
       </div>

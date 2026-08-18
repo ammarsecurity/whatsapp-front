@@ -1,9 +1,4 @@
-import {
-  History,
-  Image,
-  Phone,
-  Send,
-} from 'lucide-react'
+import { Image as ImageIcon, Phone, Send } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AccountPicker, SelectedAccountStatus } from '../components/AccountPicker'
@@ -13,6 +8,7 @@ import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { FilterSelect, ListToolbar } from '../components/ui/ListToolbar'
 import { Input } from '../components/ui/Input'
+import { KpiCard, PageHeader } from '../components/ui/PageHeader'
 import { Pagination, DEFAULT_PAGE_SIZE } from '../components/ui/Pagination'
 import { Textarea } from '../components/ui/Textarea'
 import { useAccounts } from '../context/AccountContext'
@@ -21,7 +17,8 @@ import { formatAccountLabel } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
 import type { MessageRecord, MessageStatistics } from '../types/messages'
 
-type Tab = 'compose' | 'media' | 'history'
+type Tab = 'send' | 'history'
+type SendMode = 'text' | 'file'
 type LoadingKey = 'check' | 'send' | 'media' | 'history' | null
 
 function formatMessageActionError(err: unknown, fallback: string): string {
@@ -29,12 +26,40 @@ function formatMessageActionError(err: unknown, fallback: string): string {
     return fallback
   }
   if (err.status === 408 || err.status === 504) {
-    return `${err.message} Go to Accounts → Clear stuck sessions, then scan QR again.`
+    return `${err.message} افتح الحسابات ← امسح الجلسات العالقة، ثم امسح رمز QR من جديد.`
   }
   if (err.status === 503) {
-    return `${err.message} Wait until the account shows Ready to send.`
+    return `${err.message} انتظر حتى يظهر الحساب جاهزاً للإرسال.`
   }
   return err.message
+}
+
+function messageStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    sent: 'مرسلة',
+    failed: 'فاشلة',
+    pending: 'قيد الانتظار',
+  }
+  return map[status] ?? status
+}
+
+function messageTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    text: 'نص',
+    image: 'صورة',
+    document: 'مستند',
+    audio: 'صوت',
+    video: 'فيديو',
+    media: 'وسائط',
+  }
+  return map[type] ?? type
+}
+
+function parsePhones(raw: string): string[] {
+  return raw
+    .split(/[\n,;]+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
 }
 
 export function MessagesPage() {
@@ -46,7 +71,8 @@ export function MessagesPage() {
   } = useAccounts()
   const accountId = selectedAccountId
 
-  const [tab, setTab] = useState<Tab>('compose')
+  const [tab, setTab] = useState<Tab>('send')
+  const [sendMode, setSendMode] = useState<SendMode>('text')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [message, setMessage] = useState('')
   const [phoneList, setPhoneList] = useState('')
@@ -75,13 +101,14 @@ export function MessagesPage() {
   const polling = liveStatusPolling
   const accountReady = isAccountReady(accountStatus?.raw)
   const displayName = accountId ? formatAccountLabel(accountId) : ''
-
-  function parsePhones(raw: string): string[] {
-    return raw
-      .split(/[\n,;]+/)
-      .map((p) => p.trim())
-      .filter(Boolean)
-  }
+  const recipients = parsePhones(sendMode === 'text' ? phoneList : mediaPhones)
+  const numberExists =
+    checkResult !== null &&
+    typeof checkResult === 'object' &&
+    checkResult &&
+    'exists' in (checkResult as object)
+      ? Boolean((checkResult as { exists?: boolean }).exists)
+      : null
 
   async function checkNumber() {
     if (!accountId) return
@@ -91,7 +118,7 @@ export function MessagesPage() {
       const data = await api.checkNumber({ accountId, phoneNumber })
       setCheckResult(data)
     } catch (err) {
-      setError(formatMessageActionError(err, 'Check failed'))
+      setError(formatMessageActionError(err, 'فشل التحقق'))
       setCheckResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
@@ -102,17 +129,17 @@ export function MessagesPage() {
     if (!accountId) return
     setLoading('send')
     setError(null)
-    const phoneNumbers = parsePhones(phoneList)
-    if (!phoneNumbers.length) {
-      setError('Add at least one phone number')
+    if (!recipients.length) {
+      setError('أضف رقماً واحداً على الأقل')
       setLoading(null)
       return
     }
     try {
-      const data = await api.sendMessage({ accountId, message, phoneNumbers })
+      const data = await api.sendMessage({ accountId, message, phoneNumbers: recipients })
       setSendResult(data)
+      setTab('history')
     } catch (err) {
-      setError(formatMessageActionError(err, 'Send failed'))
+      setError(formatMessageActionError(err, 'فشل الإرسال'))
       setSendResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
@@ -123,28 +150,28 @@ export function MessagesPage() {
     if (!accountId) return
     setLoading('media')
     setError(null)
-    const phoneNumbers = parsePhones(mediaPhones)
     if (!mediaFile) {
-      setError('Choose a file to send')
+      setError('اختر ملفاً للإرسال')
       setLoading(null)
       return
     }
-    if (!phoneNumbers.length) {
-      setError('Add at least one phone number')
+    if (!recipients.length) {
+      setError('أضف رقماً واحداً على الأقل')
       setLoading(null)
       return
     }
     try {
       const data = await api.sendMedia({
         accountId,
-        phoneNumbers,
+        phoneNumbers: recipients,
         file: mediaFile,
         mediaType,
         caption: caption.trim() || undefined,
       })
       setMediaResult(data)
+      setTab('history')
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Media send failed')
+      setError(err instanceof ApiClientError ? err.message : 'فشل إرسال الملف')
       setMediaResult(err instanceof ApiClientError ? err.body : null)
     } finally {
       setLoading(null)
@@ -172,7 +199,7 @@ export function MessagesPage() {
       setHistoryTotalPages(page.totalPages)
       setStats(statistics)
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Failed to load history')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر تحميل السجل')
       setHistory([])
       setHistoryTotal(0)
       setHistoryTotalPages(1)
@@ -187,342 +214,416 @@ export function MessagesPage() {
   }, [accountId, historyStatus, historySearch, historyPageSize])
 
   useEffect(() => {
+    if (!accountId) {
+      setStats(null)
+      return
+    }
+    api.messageStatistics(accountId).then(setStats).catch(() => setStats(null))
+  }, [accountId])
+
+  useEffect(() => {
     if (tab === 'history' && accountId) loadHistory()
   }, [tab, loadHistory, accountId])
 
-  const tabs: { id: Tab; label: string; icon: typeof Send }[] = [
-    { id: 'compose', label: 'Compose', icon: Send },
-    { id: 'media', label: 'Send media', icon: Image },
-    { id: 'history', label: 'History', icon: History },
-  ]
-
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Messages</h1>
-        <p className="mt-1 text-sm text-muted">
-          Send and track messages from your linked WhatsApp numbers
-        </p>
-      </header>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHeader
+        title="الرسائل"
+        description="تحقق من رقم، أرسل نصاً أو ملفاً، ثم تابع النتيجة من السجل."
+      />
 
-      <Card title="Send from">
-        <AccountPicker compact showStatus={false} />
-        {accountId && (
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <SelectedAccountStatus statusData={accountStatus} polling={polling} />
-            {!accountReady && (
-              <p className="text-sm text-amber-600">
-                {displayName} is not ready yet.{' '}
-                <Link to="/accounts" className="underline">
-                  Link it with QR
-                </Link>
-              </p>
-            )}
-            <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
-              Refresh status
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      <div className="flex rounded-xl border border-border bg-panel p-1">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors ${
-              tab === id
-                ? 'bg-card text-text shadow-sm'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:gap-6">
+        <KpiCard label="الإجمالي" value={String(stats?.total ?? 0)} />
+        <KpiCard label="مرسلة" value={String(stats?.sent ?? 0)} tone="success" />
+        <KpiCard label="فاشلة" value={String(stats?.failed ?? 0)} tone="danger" />
+        <KpiCard
+          label="الحساب"
+          value={displayName || '—'}
+          hint={accountReady ? 'جاهز للإرسال' : accountId ? 'يحتاج ربط' : 'اختر حساباً'}
+          tone={accountReady ? 'success' : 'warning'}
+        />
       </div>
 
       {error && (
-        <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
+        <Alert variant="error" title="خطأ" onDismiss={() => setError(null)}>
           {error}
           {(error.includes('timed out') || error.includes('stuck')) && (
             <span>
               {' '}
-              <Link to="/accounts" className="underline">
-                Open Accounts
+              <Link to="/accounts" className="font-semibold underline">
+                افتح الحسابات
               </Link>
             </span>
           )}
         </Alert>
       )}
 
-      {!accountId && (
-        <Alert variant="info" title="Choose an account">
-          Select a WhatsApp account above, or{' '}
-          <Link to="/accounts" className="text-wa-green underline">
-            add one first
-          </Link>
-          .
-        </Alert>
-      )}
-
-      {tab === 'compose' && accountId && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card
-            title="Check a number"
-            description="See if a phone number has WhatsApp"
-            action={<Phone className="h-4 w-4 text-muted" />}
+      <div className="flex gap-1 rounded-[16px] bg-white p-1 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+        {(
+          [
+            { id: 'send' as const, label: 'إرسال' },
+            { id: 'history' as const, label: 'السجل' },
+          ]
+        ).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setTab(item.id)}
+            className={`min-h-11 flex-1 rounded-[14px] px-4 text-[15px] font-semibold transition-colors ${
+              tab === item.id
+                ? 'bg-primary-50 text-primary-700'
+                : 'text-muted hover:bg-slate-50 hover:text-text'
+            }`}
           >
-            <div className="space-y-3">
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'send' && (
+        <div className="grid items-start gap-6 lg:grid-cols-12">
+          <Card
+            title="رسالة جديدة"
+            description="اختر الحساب ثم أرسل نصاً أو ملفاً"
+            className="lg:col-span-7"
+          >
+            {!accountId ? (
+              <div className="rounded-[16px] bg-slate-50 p-6">
+                <p className="text-[15px] font-semibold text-text">لا يوجد حساب محدد</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                  أضف رقماً من صفحة الحسابات ثم اربطه بمسح QR.
+                </p>
+                <Link to="/accounts" className="mt-4 inline-flex">
+                  <Button>فتح الحسابات</Button>
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <AccountPicker compact showStatus={false} />
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <SelectedAccountStatus statusData={accountStatus} polling={polling} />
+                    {!accountReady && (
+                      <p className="text-[13px] text-amber-700">
+                        {displayName} غير جاهز.{' '}
+                        <Link to="/accounts" className="font-semibold underline">
+                          ربط بمسح QR
+                        </Link>
+                      </p>
+                    )}
+                    <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
+                      تحديث الحالة
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex gap-1 rounded-[16px] bg-slate-50 p-1">
+                  {(
+                    [
+                      { id: 'text' as const, label: 'نص' },
+                      { id: 'file' as const, label: 'ملف' },
+                    ]
+                  ).map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => setSendMode(mode.id)}
+                      className={`min-h-11 flex-1 rounded-[14px] px-4 text-[15px] font-semibold transition-colors ${
+                        sendMode === mode.id
+                          ? 'bg-white text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]'
+                          : 'text-muted hover:text-text'
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+
+                {sendMode === 'text' ? (
+                  <div className="space-y-4">
+                    <Textarea
+                      label="نص الرسالة"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      rows={5}
+                      placeholder="اكتب رسالتك…"
+                    />
+                    <Textarea
+                      label="المستلمون"
+                      value={phoneList}
+                      onChange={(e) => setPhoneList(e.target.value)}
+                      rows={4}
+                      hint="رقم في كل سطر، أو مفصولة بفواصل — رمز الدولة بدون +"
+                      placeholder="9647807110011"
+                    />
+                    {sendResult !== null && showApiDetails && <JsonBlock data={sendResult} />}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <label className="block space-y-2">
+                      <span className="block text-[15px] font-medium text-text">اختر ملفاً</span>
+                      <input
+                        type="file"
+                        onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
+                        className="block w-full text-[15px] text-muted file:me-3 file:rounded-[14px] file:border-0 file:bg-primary-50 file:px-4 file:py-2 file:text-[15px] file:font-medium file:text-primary-700"
+                      />
+                    </label>
+                    {mediaFile && (
+                      <p className="text-[13px] text-muted" dir="ltr">
+                        {mediaFile.name}
+                      </p>
+                    )}
+                    <label className="block space-y-2">
+                      <span className="block text-[15px] font-medium text-text">نوع الملف</span>
+                      <select
+                        value={mediaType}
+                        onChange={(e) => setMediaType(e.target.value as typeof mediaType)}
+                        className="min-h-11 w-full rounded-[14px] border border-border bg-white px-4 text-[15px] text-text outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                      >
+                        <option value="document">مستند</option>
+                        <option value="image">صورة</option>
+                        <option value="audio">صوت</option>
+                        <option value="video">فيديو</option>
+                      </select>
+                    </label>
+                    <Textarea
+                      label="تعليق (اختياري)"
+                      value={caption}
+                      onChange={(e) => setCaption(e.target.value)}
+                      rows={2}
+                    />
+                    <Textarea
+                      label="المستلمون"
+                      value={mediaPhones}
+                      onChange={(e) => setMediaPhones(e.target.value)}
+                      rows={4}
+                      hint="رقم في كل سطر، أو مفصولة بفواصل"
+                    />
+                    {mediaResult !== null && showApiDetails && <JsonBlock data={mediaResult} />}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <div className="space-y-6 lg:col-span-5">
+            <Card title="ملخص قبل الإرسال">
+              <ul className="space-y-4">
+                <li>
+                  <p className="text-[13px] text-muted">من</p>
+                  <p className="mt-0.5 text-[15px] font-semibold text-text">
+                    {displayName || 'غير محدد'}
+                  </p>
+                </li>
+                <li>
+                  <p className="text-[13px] text-muted">النوع</p>
+                  <p className="mt-0.5 text-[15px] font-semibold text-text">
+                    {sendMode === 'text' ? 'رسالة نصية' : mediaFile ? mediaFile.name : 'ملف'}
+                  </p>
+                </li>
+                <li>
+                  <p className="text-[13px] text-muted">المستلمون</p>
+                  <p className="mt-0.5 text-[15px] font-semibold text-text">
+                    {recipients.length} رقم
+                  </p>
+                </li>
+              </ul>
+
+              {sendMode === 'text' && message.trim() && (
+                <div className="mt-4 rounded-[16px] bg-slate-50 px-4 py-4">
+                  <p className="text-[13px] text-muted">المعاينة</p>
+                  <p className="mt-2 line-clamp-5 whitespace-pre-wrap text-[15px] text-text">
+                    {message.trim()}
+                  </p>
+                </div>
+              )}
+
+              <Button
+                className="mt-6 w-full"
+                loading={loading === 'send' || loading === 'media'}
+                disabled={!accountReady || !accountId}
+                onClick={sendMode === 'text' ? sendMessage : sendMedia}
+              >
+                {sendMode === 'text' ? (
+                  <>
+                    <Send className="h-4 w-4" />
+                    إرسال الرسالة
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="h-4 w-4" />
+                    إرسال الملف
+                  </>
+                )}
+              </Button>
+              {!accountReady && accountId && (
+                <p className="mt-3 text-center text-[13px] text-muted">
+                  اربط الحساب بمسح QR قبل الإرسال.
+                </p>
+              )}
+            </Card>
+
+            <Card
+              title="التحقق من رقم"
+              description="هل الرقم مسجّل على واتساب؟"
+              action={<Phone className="h-4 w-4 text-muted" />}
+            >
               <Input
-                label="Phone number"
+                label="رقم الهاتف"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 placeholder="9647807110011"
-                hint="Country code without + (e.g. 964 for Iraq)"
+                hint="رمز الدولة بدون + (مثل 964 للعراق)"
               />
               <Button
+                className="mt-4 w-full"
+                variant="secondary"
                 loading={loading === 'check'}
-                disabled={!accountReady}
+                disabled={!accountReady || !accountId}
                 onClick={checkNumber}
               >
-                Check on WhatsApp
+                تحقق في واتساب
               </Button>
+              {numberExists !== null && (
+                <div
+                  className={`mt-4 rounded-[16px] px-4 py-3 text-[15px] font-medium ${
+                    numberExists ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'
+                  }`}
+                >
+                  {numberExists ? 'هذا الرقم مسجّل على واتساب' : 'غير موجود على واتساب'}
+                </div>
+              )}
               {checkResult !== null && showApiDetails && (
-                <JsonBlock data={checkResult} />
+                <div className="mt-4">
+                  <JsonBlock data={checkResult} />
+                </div>
               )}
-              {checkResult !== null && !showApiDetails && typeof checkResult === 'object' && checkResult && 'exists' in (checkResult as object) && (
-                <p className="text-sm text-text">
-                  {(checkResult as { exists?: boolean }).exists
-                    ? '✓ This number is on WhatsApp'
-                    : '✗ Not found on WhatsApp'}
-                </p>
-              )}
-            </div>
-          </Card>
+            </Card>
 
-          <Card
-            title="Send a message"
-            description={`From ${displayName}`}
-            action={<Send className="h-4 w-4 text-muted" />}
-          >
-            <div className="space-y-3">
-              <Textarea
-                label="Message"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                rows={3}
-                placeholder="Write your message…"
-              />
-              <Textarea
-                label="Recipients"
-                value={phoneList}
-                onChange={(e) => setPhoneList(e.target.value)}
-                rows={3}
-                hint="One number per line, or separated by commas"
-                placeholder="9647807110011"
-              />
-              <Button
-                loading={loading === 'send'}
-                disabled={!accountReady}
-                onClick={sendMessage}
-              >
-                Send message
-              </Button>
-              {sendResult !== null && showApiDetails && (
-                <JsonBlock data={sendResult} />
-              )}
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {tab === 'media' && accountId && (
-        <Card
-          title="Send a file"
-          description={`Photos, documents, audio or video from ${displayName}`}
-          action={<Image className="h-4 w-4 text-muted" />}
-        >
-          <div className="space-y-3">
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-muted">Choose file</span>
-              <input
-                type="file"
-                onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)}
-                className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-wa-green/15 file:px-3 file:py-2 file:text-sm file:font-medium file:text-wa-green"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium text-muted">File type</span>
-              <select
-                value={mediaType}
-                onChange={(e) =>
-                  setMediaType(e.target.value as typeof mediaType)
-                }
-                className="w-full rounded-lg border border-border bg-panel px-3.5 py-2.5 text-sm text-text outline-none focus:border-wa-green"
-              >
-                <option value="document">Document</option>
-                <option value="image">Image</option>
-                <option value="audio">Audio</option>
-                <option value="video">Video</option>
-              </select>
-            </label>
-            <Textarea
-              label="Caption (optional)"
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              rows={2}
-            />
-            <Textarea
-              label="Recipients"
-              value={mediaPhones}
-              onChange={(e) => setMediaPhones(e.target.value)}
-              rows={3}
-              hint="One number per line, or separated by commas"
-            />
-            <Button
-              loading={loading === 'media'}
-              disabled={!accountReady}
-              onClick={sendMedia}
-            >
-              Send file
-            </Button>
-            {mediaResult !== null && showApiDetails && (
-              <JsonBlock data={mediaResult} />
+            {accountId && (
+              <label className="flex items-center gap-2 text-[13px] text-muted">
+                <input
+                  type="checkbox"
+                  checked={showApiDetails}
+                  onChange={(e) => setShowApiDetails(e.target.checked)}
+                  className="rounded border-border"
+                />
+                إظهار تفاصيل استجابة API (للمطورين)
+              </label>
             )}
           </div>
-        </Card>
+        </div>
       )}
 
       {tab === 'history' && accountId && (
-        <div className="space-y-4">
-          {stats && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {(
-                [
-                  ['Total', stats.total],
-                  ['Sent', stats.sent],
-                  ['Failed', stats.failed],
-                  ['Pending', stats.pending],
-                ] as const
-              ).map(([label, value]) => (
-                <div
-                  key={label}
-                  className="rounded-xl border border-border bg-panel px-4 py-3 text-center"
-                >
-                  <p className="text-xs text-muted">{label}</p>
-                  <p className="text-xl font-bold text-text">{value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Card
-            title="Message history"
-            description={displayName}
+        <Card title="سجل الرسائل" description={displayName}>
+          <ListToolbar
+            search={historySearch}
+            onSearchChange={setHistorySearch}
+            searchPlaceholder="ابحث برقم الهاتف…"
           >
-            <ListToolbar
-              search={historySearch}
-              onSearchChange={setHistorySearch}
-              searchPlaceholder="Search by phone number…"
-            >
-              <FilterSelect
-                label="Status"
-                value={historyStatus}
-                onChange={(v) => setHistoryStatus(v as typeof historyStatus)}
-                options={[
-                  { value: 'all', label: 'All messages' },
-                  { value: 'sent', label: 'Sent' },
-                  { value: 'failed', label: 'Failed' },
-                  { value: 'pending', label: 'Pending' },
-                ]}
-              />
-              <Button loading={loading === 'history'} onClick={loadHistory}>
-                Refresh
-              </Button>
-            </ListToolbar>
+            <FilterSelect
+              label="الحالة"
+              value={historyStatus}
+              onChange={(v) => setHistoryStatus(v as typeof historyStatus)}
+              options={[
+                { value: 'all', label: 'كل الرسائل' },
+                { value: 'sent', label: 'مرسلة' },
+                { value: 'failed', label: 'فاشلة' },
+                { value: 'pending', label: 'قيد الانتظار' },
+              ]}
+            />
+            <Button loading={loading === 'history'} onClick={loadHistory}>
+              تحديث
+            </Button>
+          </ListToolbar>
 
-            {loading === 'history' && history.length === 0 ? (
-              <p className="text-sm text-muted">Loading…</p>
-            ) : history.length === 0 ? (
-              <Alert variant="info" title="No messages yet">
-                Messages sent from {displayName} will appear here.
-              </Alert>
-            ) : (
-              <>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full min-w-[640px] text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-border bg-panel text-xs text-muted">
-                        <th className="px-3 py-2 font-medium">Phone</th>
-                        <th className="px-3 py-2 font-medium">Type</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
-                        <th className="px-3 py-2 font-medium">Preview</th>
-                        <th className="px-3 py-2 font-medium">Date</th>
+          {loading === 'history' && history.length === 0 ? (
+            <div className="space-y-2">
+              <div className="skeleton h-16 rounded-[16px]" />
+              <div className="skeleton h-16 rounded-[16px]" />
+            </div>
+          ) : history.length === 0 ? (
+            <div className="rounded-[16px] bg-slate-50 px-4 py-10 text-center">
+              <Send className="mx-auto h-8 w-8 text-muted" />
+              <p className="mt-3 text-[15px] font-medium text-text">لا رسائل بعد</p>
+              <p className="mt-1 text-[13px] text-muted">
+                الرسائل المرسلة من {displayName} ستظهر هنا.
+              </p>
+              <Button className="mt-4" onClick={() => setTab('send')}>
+                إرسال رسالة
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-[16px] bg-slate-50">
+                <table className="w-full min-w-[640px] text-start text-[15px]">
+                  <thead>
+                    <tr className="text-[13px] text-muted">
+                      <th className="px-4 py-3 font-medium">الهاتف</th>
+                      <th className="px-4 py-3 font-medium">النوع</th>
+                      <th className="px-4 py-3 font-medium">الحالة</th>
+                      <th className="px-4 py-3 font-medium">المعاينة</th>
+                      <th className="px-4 py-3 font-medium">التاريخ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((row) => (
+                      <tr key={row.id} className="border-t border-white last:border-0 hover:bg-white/60">
+                        <td className="px-4 py-3 font-mono text-[13px]" dir="ltr">
+                          {row.phoneNumber}
+                        </td>
+                        <td className="px-4 py-3">{messageTypeLabel(row.messageType)}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[13px] font-medium ${
+                              row.status === 'sent'
+                                ? 'bg-emerald-50 text-emerald-700'
+                                : row.status === 'failed'
+                                  ? 'bg-red-50 text-red-700'
+                                  : 'bg-amber-50 text-amber-700'
+                            }`}
+                          >
+                            {messageStatusLabel(row.status)}
+                          </span>
+                        </td>
+                        <td className="max-w-[200px] truncate px-4 py-3 text-muted">
+                          {row.mediaFileName ?? row.messageText}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-muted">
+                          {row.createdAt
+                            ? new Date(row.createdAt).toLocaleString('ar-IQ')
+                            : '—'}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {history.map((row) => (
-                        <tr
-                          key={row.id}
-                          className="border-b border-border/60 last:border-0 hover:bg-panel/40"
-                        >
-                          <td className="px-3 py-2 font-mono text-xs">{row.phoneNumber}</td>
-                          <td className="px-3 py-2">{row.messageType}</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                                row.status === 'sent'
-                                  ? 'bg-wa-green/15 text-wa-green'
-                                  : row.status === 'failed'
-                                    ? 'bg-red-500/15 text-red-300'
-                                    : 'bg-amber-500/15 text-amber-300'
-                              }`}
-                            >
-                              {row.status}
-                            </span>
-                          </td>
-                          <td className="max-w-[200px] truncate px-3 py-2 text-muted">
-                            {row.mediaFileName ?? row.messageText}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-muted">
-                            {row.createdAt
-                              ? new Date(row.createdAt).toLocaleString()
-                              : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <Pagination
-                  page={historyPage}
-                  totalPages={historyTotalPages}
-                  total={historyTotal}
-                  pageSize={historyPageSize}
-                  onPageChange={setHistoryPage}
-                  onPageSizeChange={(size) => {
-                    setHistoryPageSize(size)
-                    setHistoryPage(1)
-                  }}
-                />
-              </>
-            )}
-          </Card>
-        </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                page={historyPage}
+                totalPages={historyTotalPages}
+                total={historyTotal}
+                pageSize={historyPageSize}
+                onPageChange={setHistoryPage}
+                onPageSizeChange={(size) => {
+                  setHistoryPageSize(size)
+                  setHistoryPage(1)
+                }}
+              />
+            </>
+          )}
+        </Card>
       )}
 
-      {accountId && (
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <input
-            type="checkbox"
-            checked={showApiDetails}
-            onChange={(e) => setShowApiDetails(e.target.checked)}
-            className="rounded border-border"
-          />
-          Show API response details (developers)
-        </label>
+      {tab === 'history' && !accountId && (
+        <Alert variant="info" title="اختر حساباً">
+          حدّد حساب واتساب من تبويب الإرسال، أو{' '}
+          <Link to="/accounts" className="font-semibold text-primary-700 underline">
+            أضف واحداً أولاً
+          </Link>
+          .
+        </Alert>
       )}
     </div>
   )

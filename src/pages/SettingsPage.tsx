@@ -1,4 +1,3 @@
-import { BookOpen, Key, Settings2, ShieldBan, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ApiDocs } from '../components/docs/ApiDocs'
 import { IntegrationsPanel, OptOutPanel } from '../components/IntegrationsPanel'
@@ -6,6 +5,7 @@ import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
+import { PageHeader, SegmentedTabs } from '../components/ui/PageHeader'
 import { useAuth } from '../context/AuthContext'
 import { ApiClientError } from '../lib/api'
 import {
@@ -14,7 +14,7 @@ import {
   setApiUrl,
 } from '../lib/storage'
 
-const PRESETS = [{ label: 'From .env', url: DEFAULT_API_URL }]
+const PRESETS = [{ label: 'من ملف .env', url: DEFAULT_API_URL }]
 
 type Tab = 'account' | 'integrations' | 'optout' | 'docs' | 'config'
 
@@ -47,7 +47,7 @@ export function SettingsPage() {
     setProfileSuccess(null)
 
     if (!currentPassword) {
-      setProfileError('Current password is required')
+      setProfileError('كلمة المرور الحالية مطلوبة')
       return
     }
 
@@ -56,17 +56,17 @@ export function SettingsPage() {
     const passwordChanged = newPassword.length > 0
 
     if (!usernameChanged && !passwordChanged) {
-      setProfileError('Change username and/or enter a new password')
+      setProfileError('غيّر اسم المستخدم أو أدخل كلمة مرور جديدة')
       return
     }
 
     if (passwordChanged && newPassword.length < 6) {
-      setProfileError('New password must be at least 6 characters')
+      setProfileError('كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف')
       return
     }
 
     if (passwordChanged && newPassword !== confirmPassword) {
-      setProfileError('New passwords do not match')
+      setProfileError('كلمتا المرور الجديدتان غير متطابقتين')
       return
     }
 
@@ -77,69 +77,51 @@ export function SettingsPage() {
         ...(usernameChanged ? { username: newUsername.trim() } : {}),
         ...(passwordChanged ? { password: newPassword } : {}),
       })
-      setProfileSuccess('Profile updated successfully')
+      setProfileSuccess('تم تحديث الحساب بنجاح')
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
       setProfileError(
-        err instanceof ApiClientError ? err.message : 'Failed to update profile',
+        err instanceof ApiClientError ? err.message : 'تعذّر تحديث الحساب',
       )
     } finally {
       setProfileLoading(false)
     }
   }
 
-  const tabs: { id: Tab; label: string; icon: typeof User }[] = [
-    { id: 'account', label: 'Account', icon: User },
-    { id: 'integrations', label: 'API & Webhooks', icon: Key },
-    { id: 'optout', label: 'Opt-out', icon: ShieldBan },
-    { id: 'docs', label: 'API Documentation', icon: BookOpen },
-    { id: 'config', label: 'Configuration', icon: Settings2 },
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'account', label: 'الحساب' },
+    { id: 'integrations', label: 'API والربط' },
+    { id: 'optout', label: 'إلغاء الاشتراك' },
+    { id: 'docs', label: 'توثيق API' },
+    { id: 'config', label: 'الخادم' },
   ]
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted">
-          Account, API configuration and developer documentation
-        </p>
-      </header>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHeader
+        title="الإعدادات"
+        description="حسابك، بيانات الربط الحالية، وتوثيق واجهة البرمجة في تبويبات واضحة."
+      />
 
-      <div className="flex rounded-xl border border-border bg-panel p-1">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors ${
-              tab === id
-                ? 'bg-card text-text shadow-sm'
-                : 'text-muted hover:text-text'
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            <span className="hidden sm:inline">{label}</span>
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
 
       {tab === 'account' && (
         <Card
-          title="Your account"
-          description="PATCH /api/auth/profile — change username or password"
+          title="حسابك"
+          description="تغيير اسم المستخدم أو كلمة المرور"
         >
-          <div className="space-y-4">
+          <div className="max-w-[700px] space-y-4">
             {profileError && (
-              <Alert variant="error" title="Error" onDismiss={() => setProfileError(null)}>
+              <Alert variant="error" title="خطأ" onDismiss={() => setProfileError(null)}>
                 {profileError}
               </Alert>
             )}
             {profileSuccess && (
               <Alert
                 variant="success"
-                title="Saved"
+                title="تم الحفظ"
                 onDismiss={() => setProfileSuccess(null)}
               >
                 {profileSuccess}
@@ -147,7 +129,7 @@ export function SettingsPage() {
             )}
 
             <Input
-              label="Current password"
+              label="كلمة المرور الحالية"
               type="password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
@@ -155,31 +137,33 @@ export function SettingsPage() {
               required
             />
             <Input
-              label="Username"
+              label="اسم المستخدم"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
               autoComplete="username"
-              hint={`Signed in as ${user?.username ?? '—'}`}
+              hint={`مسجّل الدخول باسم ${user?.username ?? '—'}`}
             />
             <Input
-              label="New password"
+              label="كلمة المرور الجديدة"
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
-              hint="Leave blank to keep current password"
+              hint="اتركها فارغة للإبقاء على كلمة المرور الحالية"
             />
             <Input
-              label="Confirm new password"
+              label="تأكيد كلمة المرور الجديدة"
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
             />
 
-            <Button loading={profileLoading} onClick={saveProfile}>
-              Save changes
-            </Button>
+            <div className="flex justify-end">
+              <Button loading={profileLoading} onClick={saveProfile}>
+                حفظ التغييرات
+              </Button>
+            </div>
           </div>
         </Card>
       )}
@@ -193,21 +177,21 @@ export function SettingsPage() {
           {saved && (
             <Alert
               variant="success"
-              title="Saved"
+              title="تم الحفظ"
               onDismiss={() => setSaved(false)}
             >
-              API URL saved. Documentation examples will use the new base URL.
+              حُفظ عنوان الـ API. أمثلة التوثيق ستستخدم العنوان الجديد.
             </Alert>
           )}
 
-          <Card title="API base URL">
-            <div className="space-y-4">
+          <Card title="عنوان خادم الـ API">
+            <div className="max-w-[700px] space-y-4">
               <Input
-                label="Base URL"
+                label="عنوان الخادم"
                 value={apiUrl}
                 onChange={(e) => setApiUrlState(e.target.value)}
                 placeholder={DEFAULT_API_URL}
-                hint="No trailing slash. Used for all console requests and cURL examples in docs."
+                hint="بدون شرطة في النهاية. يُستخدم لكل طلبات اللوحة وأمثلة cURL."
               />
 
               <div className="flex flex-wrap gap-2">
@@ -216,14 +200,16 @@ export function SettingsPage() {
                     key={p.url}
                     type="button"
                     onClick={() => setApiUrlState(p.url)}
-                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-wa-green/50 hover:text-text"
+                    className="min-h-11 rounded-[14px] bg-slate-50 px-4 text-[13px] font-medium text-muted transition-colors hover:bg-primary-50 hover:text-primary-700"
                   >
                     {p.label}
                   </button>
                 ))}
               </div>
 
-              <Button onClick={save}>Save settings</Button>
+              <div className="flex justify-end">
+                <Button onClick={save}>حفظ الإعدادات</Button>
+              </div>
             </div>
           </Card>
         </>

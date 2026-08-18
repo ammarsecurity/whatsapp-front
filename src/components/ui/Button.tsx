@@ -10,12 +10,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-wa-green text-surface hover:bg-[#20bd5a] disabled:opacity-50',
+    'bg-primary-500 text-white hover:bg-primary-700 disabled:opacity-50 shadow-sm',
   secondary:
-    'bg-card border border-border text-text hover:bg-[#263840] disabled:opacity-50',
+    'bg-white border border-border text-text hover:bg-slate-50 disabled:opacity-50',
   danger:
-    'bg-red-600/90 text-white hover:bg-red-600 disabled:opacity-50',
-  ghost: 'text-muted hover:text-text hover:bg-card/60',
+    'bg-danger text-white hover:bg-red-600 disabled:opacity-50',
+  ghost: 'text-muted hover:text-text hover:bg-slate-100',
 }
 
 export function Button({
@@ -24,12 +24,13 @@ export function Button({
   className = '',
   children,
   disabled,
+  type = 'button',
   ...props
 }: ButtonProps) {
   return (
     <button
-      type="button"
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${variants[variant]} ${className}`}
+      type={type}
+      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-[14px] px-4 py-2.5 text-[15px] font-semibold transition-colors ${variants[variant]} ${className}`}
       disabled={disabled || loading}
       {...props}
     >

@@ -36,20 +36,20 @@ const variantConfig: Record<
 > = {
   danger: {
     icon: Trash2,
-    iconBg: 'bg-red-500/15',
-    iconColor: 'text-red-400',
+    iconBg: 'bg-red-50',
+    iconColor: 'text-danger',
     button: 'danger',
   },
   warning: {
     icon: AlertTriangle,
-    iconBg: 'bg-amber-500/15',
-    iconColor: 'text-amber-300',
+    iconBg: 'bg-amber-50',
+    iconColor: 'text-warning',
     button: 'primary',
   },
   default: {
     icon: AlertTriangle,
-    iconBg: 'bg-wa-green/15',
-    iconColor: 'text-wa-green',
+    iconBg: 'bg-primary-50',
+    iconColor: 'text-primary-700',
     button: 'primary',
   },
 }
@@ -80,7 +80,7 @@ function ConfirmModal({
       <button
         type="button"
         className="absolute inset-0 bg-surface/80 backdrop-blur-sm"
-        aria-label="Close dialog"
+        aria-label="إغلاق النافذة"
         onClick={() => onClose(false)}
       />
       <div
@@ -88,7 +88,7 @@ function ConfirmModal({
         aria-modal="true"
         aria-labelledby="confirm-title"
         aria-describedby="confirm-message"
-        className="relative w-full max-w-md animate-[dialog-in_0.2s_ease-out] overflow-hidden rounded-2xl border border-border bg-panel shadow-2xl shadow-black/50"
+        className="relative w-full max-w-md animate-[dialog-in_0.2s_ease-out] overflow-hidden rounded-[16px] bg-white shadow-[0px_8px_24px_rgba(15,23,42,0.16)]"
       >
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-wa-green/40 to-transparent" />
         <div className="p-6">
@@ -115,13 +115,13 @@ function ConfirmModal({
           </div>
           <div className="mt-6 flex flex-wrap justify-end gap-2">
             <Button variant="secondary" onClick={() => onClose(false)}>
-              {state.cancelLabel ?? 'Cancel'}
+              {state.cancelLabel ?? 'إلغاء'}
             </Button>
             <Button
               variant={cfg.button}
               onClick={() => onClose(true)}
             >
-              {state.confirmLabel ?? 'Confirm'}
+              {state.confirmLabel ?? 'تأكيد'}
             </Button>
           </div>
         </div>

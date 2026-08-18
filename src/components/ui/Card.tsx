@@ -6,6 +6,7 @@ interface CardProps {
   children: ReactNode
   className?: string
   action?: ReactNode
+  id?: string
 }
 
 export function Card({
@@ -14,19 +15,21 @@ export function Card({
   children,
   className = '',
   action,
+  id,
 }: CardProps) {
   return (
     <section
-      className={`rounded-xl border border-border bg-card/80 p-5 shadow-lg shadow-black/20 ${className}`}
+      id={id}
+      className={`rounded-[16px] border-0 bg-white p-6 shadow-[0px_1px_3px_rgba(15,23,42,0.08)] ${className}`}
     >
       {(title || action) && (
-        <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             {title && (
-              <h2 className="text-base font-semibold text-text">{title}</h2>
+              <h2 className="text-lg font-semibold text-text">{title}</h2>
             )}
             {description && (
-              <p className="mt-0.5 text-sm text-muted">{description}</p>
+              <p className="mt-1 text-[13px] text-muted">{description}</p>
             )}
           </div>
           {action}

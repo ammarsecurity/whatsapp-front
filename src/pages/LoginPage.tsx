@@ -28,7 +28,7 @@ export function LoginPage() {
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Something went wrong',
+            : 'حدث خطأ غير متوقع',
       )
     } finally {
       setLoading(false)
@@ -36,30 +36,30 @@ export function LoginPage() {
   }
 
   return (
-    <div className="bg-app-pattern flex min-h-full items-center justify-center p-6">
+    <div className="flex min-h-full items-center justify-center bg-surface p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-wa-green shadow-lg shadow-wa-green/25">
-            <MessageCircle className="h-8 w-8 text-surface" strokeWidth={2.2} />
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-[16px] bg-primary-500 shadow-[0px_4px_12px_rgba(15,23,42,0.12)]">
+            <MessageCircle className="h-8 w-8 text-white" strokeWidth={2.2} />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">WhatsApp Console</h1>
-          <p className="mt-1 text-sm text-muted">
-            Manage accounts, send messages, and monitor status
+          <h1 className="text-[32px] font-bold leading-tight text-text">وحدة تحكم واتساب</h1>
+          <p className="mt-2 text-[15px] text-muted">
+            إدارة الأرقام، إرسال الرسائل، ومتابعة حالة الجلسات من مكان واحد
           </p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-panel p-6 shadow-xl shadow-black/30">
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="rounded-[16px] bg-white p-8 shadow-[0px_8px_24px_rgba(15,23,42,0.16)]">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <Input
-              label="Username"
+              label="اسم المستخدم"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="your_username"
+              placeholder="admin"
               required
               autoComplete="username"
             />
             <Input
-              label="Password"
+              label="كلمة المرور"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -69,13 +69,13 @@ export function LoginPage() {
             />
 
             {error && (
-              <Alert variant="error" title="Sign in failed">
+              <Alert variant="error" title="تعذّر تسجيل الدخول">
                 {error}
               </Alert>
             )}
 
             <Button type="submit" className="w-full" loading={loading} variant="primary">
-              Sign in
+              دخول
             </Button>
           </form>
         </div>

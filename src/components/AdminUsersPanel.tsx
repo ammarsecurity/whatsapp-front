@@ -11,6 +11,10 @@ import { api, ApiClientError } from '../lib/api'
 import { filterBySearch, paginateMeta, slicePage } from '../lib/pagination'
 import type { AdminUser } from '../types/models'
 
+function roleLabel(user: AdminUser) {
+  return user.role === 'admin' || user.isAdmin ? 'مدير' : 'مستخدم'
+}
+
 export function AdminUsersPanel() {
   const confirmDialog = useConfirm()
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -37,7 +41,7 @@ export function AdminUsersPanel() {
       setUsers(await api.listUsers())
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Failed to load users',
+        err instanceof ApiClientError ? err.message : 'تعذّر تحميل المستخدمين',
       )
     } finally {
       setLoading(false)
@@ -66,7 +70,7 @@ export function AdminUsersPanel() {
 
   async function createUser() {
     if (!username.trim() || !password) {
-      setError('Username and password are required')
+      setError('اسم المستخدم وكلمة المرور مطلوبان')
       return
     }
     setActionLoading('create')
@@ -74,13 +78,13 @@ export function AdminUsersPanel() {
     setSuccess(null)
     try {
       await api.createUser({ username: username.trim(), password })
-      setSuccess(`User "${username}" created`)
+      setSuccess(`أُنشئ المستخدم "${username}"`)
       setUsername('')
       setPassword('')
       await loadUsers()
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Failed to create user',
+        err instanceof ApiClientError ? err.message : 'تعذّر إنشاء المستخدم',
       )
     } finally {
       setActionLoading(null)
@@ -110,11 +114,11 @@ export function AdminUsersPanel() {
     const usernameChanged = trimmed.length > 0 && trimmed !== user.username
 
     if (!usernameChanged && !passwordChanged) {
-      setError('Change username and/or enter a new password')
+      setError('غيّر اسم المستخدم أو أدخل كلمة مرور جديدة')
       return
     }
     if (passwordChanged && editPassword.length < 6) {
-      setError('Password must be at least 6 characters')
+      setError('كلمة المرور يجب ألا تقل عن 6 أحرف')
       return
     }
 
@@ -126,12 +130,12 @@ export function AdminUsersPanel() {
         ...(usernameChanged ? { username: trimmed } : {}),
         ...(passwordChanged ? { password: editPassword } : {}),
       })
-      setSuccess(`Updated ${trimmed || user.username}`)
+      setSuccess(`تم تحديث ${trimmed || user.username}`)
       cancelEdit()
       await loadUsers()
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Failed to update user',
+        err instanceof ApiClientError ? err.message : 'تعذّر تحديث المستخدم',
       )
     } finally {
       setActionLoading(null)
@@ -140,13 +144,13 @@ export function AdminUsersPanel() {
 
   async function removeUser(user: AdminUser) {
     if (!user.userId) {
-      setError('User ID not available')
+      setError('معرّف المستخدم غير متاح')
       return
     }
     const ok = await confirmDialog({
-      title: 'Delete user',
-      message: `Remove "${user.username}" and all their accounts/messages?`,
-      confirmLabel: 'Delete',
+      title: 'حذف المستخدم',
+      message: `حذف "${user.username}" وكل حساباته ورسائله؟`,
+      confirmLabel: 'حذف',
       variant: 'danger',
     })
     if (!ok) return
@@ -155,11 +159,11 @@ export function AdminUsersPanel() {
     setSuccess(null)
     try {
       await api.deleteUser(user.userId)
-      setSuccess(`Deleted ${user.username}`)
+      setSuccess(`حُذف ${user.username}`)
       await loadUsers()
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Failed to delete user',
+        err instanceof ApiClientError ? err.message : 'تعذّر حذف المستخدم',
       )
     } finally {
       setActionLoading(null)
@@ -167,77 +171,81 @@ export function AdminUsersPanel() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {error && (
-        <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
+        <Alert variant="error" title="خطأ" onDismiss={() => setError(null)}>
           {error}
         </Alert>
       )}
       {success && (
-        <Alert variant="success" title="Success" onDismiss={() => setSuccess(null)}>
+        <Alert variant="success" title="تم" onDismiss={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
       <Card
-        title="New user"
-        description="POST /api/users"
+        title="مستخدم جديد"
+        description="إنشاء حساب دخول للوحة التحكم"
         action={<UserPlus className="h-4 w-4 text-muted" />}
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid max-w-[700px] gap-4 sm:grid-cols-2">
           <Input
-            label="Username"
+            label="اسم المستخدم"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="username"
           />
           <Input
-            label="Password"
+            label="كلمة المرور"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        <Button
-          className="mt-4"
-          loading={actionLoading === 'create'}
-          onClick={createUser}
-        >
-          Add user
-        </Button>
+        <div className="mt-4 flex justify-end">
+          <Button
+            loading={actionLoading === 'create'}
+            onClick={createUser}
+          >
+            إضافة مستخدم
+          </Button>
+        </div>
       </Card>
 
-      <Card title="Users" description="GET /api/users · PATCH /api/users/:id">
+      <Card title="المستخدمون" description="تعديل الأسماء وكلمات المرور أو الحذف">
         <ListToolbar
           search={userSearch}
           onSearchChange={setUserSearch}
-          searchPlaceholder="Search username or ID…"
+          searchPlaceholder="ابحث باسم المستخدم أو المعرّف…"
         />
         <div className="mb-3 flex justify-end">
           <Button variant="secondary" loading={loading} onClick={loadUsers}>
-            Refresh
+            تحديث
           </Button>
         </div>
         {loading && users.length === 0 ? (
-          <p className="text-sm text-muted">Loading…</p>
+          <div className="space-y-2">
+            <div className="skeleton h-12 rounded-[14px]" />
+            <div className="skeleton h-12 rounded-[14px]" />
+          </div>
         ) : users.length === 0 ? (
-          <Alert variant="info" title="No users">
-            No users returned from the API.
+          <Alert variant="info" title="لا يوجد مستخدمون">
+            لم تُرجع الواجهة أي مستخدمين.
           </Alert>
         ) : filteredUsers.length === 0 ? (
-          <Alert variant="info" title="No matches">
-            No users match your search.
+          <Alert variant="info" title="لا توجد نتائج">
+            لا يوجد مستخدمون يطابقون البحث.
           </Alert>
         ) : (
           <>
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full min-w-[640px] text-left text-sm">
+          <div className="overflow-x-auto rounded-[16px] bg-slate-50">
+            <table className="w-full min-w-[640px] text-start text-[15px]">
               <thead>
-                <tr className="border-b border-border bg-panel text-xs text-muted">
-                  <th className="px-4 py-3 font-medium">ID</th>
-                  <th className="px-4 py-3 font-medium">Username</th>
-                  <th className="px-4 py-3 font-medium">Role</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                <tr className="text-[13px] text-muted">
+                  <th className="px-4 py-3 font-medium">المعرّف</th>
+                  <th className="px-4 py-3 font-medium">اسم المستخدم</th>
+                  <th className="px-4 py-3 font-medium">الدور</th>
+                  <th className="px-4 py-3 text-end font-medium">إجراءات</th>
                 </tr>
               </thead>
               <tbody>
@@ -246,7 +254,7 @@ export function AdminUsersPanel() {
                   return (
                     <tr
                       key={u.userId ?? u.username}
-                      className="border-b border-border/60 last:border-0 hover:bg-panel/50"
+                      className="border-t border-white hover:bg-white/70"
                     >
                       <td className="px-4 py-3 text-muted">{u.userId ?? '—'}</td>
                       <td className="px-4 py-3">
@@ -255,14 +263,14 @@ export function AdminUsersPanel() {
                             <Input
                               value={editUsername}
                               onChange={(e) => setEditUsername(e.target.value)}
-                              aria-label="Edit username"
+                              aria-label="تعديل اسم المستخدم"
                             />
                             <Input
                               type="password"
                               value={editPassword}
                               onChange={(e) => setEditPassword(e.target.value)}
-                              placeholder="New password (optional)"
-                              aria-label="New password"
+                              placeholder="كلمة مرور جديدة (اختياري)"
+                              aria-label="كلمة المرور الجديدة"
                             />
                           </div>
                         ) : (
@@ -271,13 +279,13 @@ export function AdminUsersPanel() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          className={`rounded-full px-2 py-0.5 text-[13px] font-medium ${
                             u.role === 'admin' || u.isAdmin
-                              ? 'bg-wa-green/15 text-wa-green'
-                              : 'bg-border/40 text-muted'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-slate-100 text-slate-600'
                           }`}
                         >
-                          {u.role ?? (u.isAdmin ? 'admin' : 'user')}
+                          {roleLabel(u)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -288,10 +296,10 @@ export function AdminUsersPanel() {
                                 loading={actionLoading === `edit-${u.userId}`}
                                 onClick={() => saveEdit(u)}
                               >
-                                Save
+                                حفظ
                               </Button>
                               <Button variant="secondary" onClick={cancelEdit}>
-                                Cancel
+                                إلغاء
                               </Button>
                             </>
                           ) : (
@@ -300,6 +308,7 @@ export function AdminUsersPanel() {
                                 variant="secondary"
                                 onClick={() => startEdit(u)}
                                 disabled={!u.userId}
+                                title="تعديل"
                               >
                                 <Pencil className="h-4 w-4" />
                               </Button>
@@ -308,6 +317,7 @@ export function AdminUsersPanel() {
                                 loading={actionLoading === `del-${u.userId}`}
                                 onClick={() => removeUser(u)}
                                 disabled={!u.userId}
+                                title="حذف"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>

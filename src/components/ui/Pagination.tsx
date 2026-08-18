@@ -29,20 +29,20 @@ export function Pagination({
 
   return (
     <div
-      className={`flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 ${className}`}
+      className={`flex flex-wrap items-center justify-between gap-3 pt-4 ${className}`}
     >
-      <p className="text-xs text-muted">
-        Showing {from}–{to} of {total}
+      <p className="text-[13px] text-muted">
+        عرض {from}–{to} من {total}
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
         {onPageSizeChange && (
-          <label className="flex items-center gap-2 text-xs text-muted">
-            Per page
+          <label className="flex items-center gap-2 text-[13px] text-muted">
+            لكل صفحة
             <select
               value={pageSize}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
-              className="rounded-lg border border-border bg-panel px-2 py-1 text-xs text-text"
+              className="min-h-11 rounded-[14px] border border-border bg-white px-3 text-[15px] text-text"
             >
               {pageSizeOptions.map((n) => (
                 <option key={n} value={n}>
@@ -58,22 +58,22 @@ export function Pagination({
             type="button"
             disabled={page <= 1}
             onClick={() => onPageChange(page - 1)}
-            className="rounded-lg border border-border p-2 text-muted transition-colors hover:text-text disabled:opacity-40"
-            aria-label="Previous page"
+            className="flex h-11 w-11 items-center justify-center rounded-[14px] text-muted transition-colors hover:bg-slate-50 hover:text-text disabled:opacity-40"
+            aria-label="الصفحة السابقة"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4" />
           </button>
-          <span className="min-w-[4.5rem] text-center text-xs text-muted">
+          <span className="min-w-[4.5rem] text-center text-[13px] text-muted">
             {page} / {totalPages}
           </span>
           <button
             type="button"
             disabled={page >= totalPages}
             onClick={() => onPageChange(page + 1)}
-            className="rounded-lg border border-border p-2 text-muted transition-colors hover:text-text disabled:opacity-40"
-            aria-label="Next page"
+            className="flex h-11 w-11 items-center justify-center rounded-[14px] text-muted transition-colors hover:bg-slate-50 hover:text-text disabled:opacity-40"
+            aria-label="الصفحة التالية"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4" />
           </button>
         </div>
       </div>

@@ -11,7 +11,8 @@ export interface LoginResponse {
 }
 
 export interface AddAccountRequest {
-  accountId: string
+  accountId?: string
+  note?: string
 }
 
 export interface CheckNumberRequest {

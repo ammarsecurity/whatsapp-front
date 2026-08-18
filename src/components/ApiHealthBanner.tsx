@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Alert } from './ui/Alert'
 import { DEFAULT_API_URL, getApiUrl } from '../lib/storage'
 
-const MIN_API_BUILD = '2026-06-02-v25'
+const MIN_API_BUILD = '2026-08-18-v28'
 
 interface HealthResponse {
   success?: boolean
@@ -24,7 +24,7 @@ export function ApiHealthBanner() {
         if (text.trimStart().startsWith('<!')) {
           if (!cancelled) {
             setIssue(
-              `API URL "${base}" returns HTML (not the Node server). Use ${DEFAULT_API_URL} in Settings → Configuration.`,
+              `عنوان الـ API "${base}" يعيد HTML وليس خادم Node. استخدم ${DEFAULT_API_URL} من الإعدادات → الخادم.`,
             )
           }
           return
@@ -33,7 +33,7 @@ export function ApiHealthBanner() {
         if (!res.ok || !data.apiBuild) {
           if (!cancelled) {
             setIssue(
-              `Backend at ${base} is outdated (missing apiBuild). Deploy "New folder" to the server and restart Node.`,
+              `الخادم على ${base} قديم (لا يوجد apiBuild). ارفع آخر نسخة من الخلفية وأعد تشغيل Node.`,
             )
           }
           return
@@ -41,13 +41,13 @@ export function ApiHealthBanner() {
         if (data.apiBuild < MIN_API_BUILD) {
           if (!cancelled) {
             setIssue(
-              `Backend apiBuild is ${data.apiBuild}; need ${MIN_API_BUILD}+ (text send fix). Upload the latest backend and run pm2 restart.`,
+              `إصدار الخلفية ${data.apiBuild}؛ المطلوب ${MIN_API_BUILD}+. ارفع آخر نسخة وأعد تشغيل الخدمة.`,
             )
           }
         }
       } catch {
         if (!cancelled) {
-          setIssue(`Cannot reach API at ${base}. Check Settings → Configuration.`)
+          setIssue(`تعذّر الوصول إلى الـ API على ${base}. راجع الإعدادات → الخادم.`)
         }
       }
     }
@@ -60,10 +60,10 @@ export function ApiHealthBanner() {
   if (!issue) return null
 
   return (
-    <Alert variant="error" title="Backend not updated" className="mb-4">
+    <Alert variant="error" title="الخلفية غير محدّثة" className="mb-6">
       {issue}{' '}
-      <Link to="/settings" className="underline">
-        Open settings
+      <Link to="/settings" className="font-semibold underline">
+        فتح الإعدادات
       </Link>
     </Alert>
   )

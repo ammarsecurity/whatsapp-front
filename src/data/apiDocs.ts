@@ -28,8 +28,8 @@ export interface DocSection {
 }
 
 export const API_VERSION = 'v1'
-export const API_BUILD = '2026-06-02-v12'
-export const DEFAULT_BASE = 'http://74.50.65.142:8489'
+export const API_BUILD = '2026-08-18-v30'
+export const DEFAULT_BASE = 'https://whatsapp-api.smartstick-iq.com'
 
 const PAGINATION_PARAMS: DocParam[] = [
   { name: 'limit', type: 'integer', description: 'Page size (default 20, max 100).' },
@@ -47,8 +47,87 @@ export const DOC_SECTIONS: DocSection[] = [
     id: 'intro',
     title: 'Introduction',
     description:
-      'REST API for WhatsApp account linking, outbound/inbound messaging, contact groups, campaigns, templates, inbox, webhooks, and API keys. Paths are relative to your configured base URL (no trailing /api).',
+      'REST API for WhatsApp account linking, outbound messaging, contact groups, campaigns, templates, webhooks, and API keys. Paths are relative to your configured base URL (no trailing /api).',
     endpoints: [],
+  },
+  {
+    id: 'instance-api',
+    title: 'Instance token API',
+    description:
+      'Send without JWT using instance_id (your WhatsApp account id) and token (API key). token can be query, form body, or JSON.',
+    endpoints: [
+      {
+        id: 'ultra-chat',
+        method: 'POST',
+        path: '/:instance_id/messages/chat',
+        title: 'Send text',
+        description: 'Variables: token, to, body.',
+        auth: false,
+        body: { token: 'wsk_…', to: '9647807110011', body: 'Hello' },
+        response: { sent: 'true', message: 'ok', id: 'true_…@lid_…' },
+        notes: [
+          'If the WhatsApp session is not ready, response is { sent: "queue" } and the message is sent when the instance reconnects.',
+          'Base URL is your API host. instance_id is the account id. token is the API key from Settings.',
+        ],
+      },
+      {
+        id: 'ultra-image',
+        method: 'POST',
+        path: '/:instance_id/messages/image',
+        title: 'Send image',
+        auth: false,
+        body: {
+          token: 'wsk_…',
+          to: '9647807110011',
+          image: 'https://example.com/photo.jpg',
+          caption: 'optional',
+        },
+        response: { sent: 'true', message: 'ok', id: '…' },
+      },
+      {
+        id: 'ultra-document',
+        method: 'POST',
+        path: '/:instance_id/messages/document',
+        title: 'Send document',
+        auth: false,
+        body: {
+          token: 'wsk_…',
+          to: '9647807110011',
+          document: 'https://example.com/file.pdf',
+          filename: 'file.pdf',
+        },
+        response: { sent: 'true', message: 'ok', id: '…' },
+      },
+      {
+        id: 'ultra-check',
+        method: 'GET',
+        path: '/:instance_id/contacts/check?token=TOKEN&chatId=9647…',
+        title: 'Check WhatsApp number',
+        auth: false,
+        params: [
+          { name: 'token', type: 'string', required: true, description: 'API key (token).' },
+          { name: 'chatId', type: 'string', required: true, description: 'Phone or xxx@c.us' },
+        ],
+        response: { status: 'valid' },
+      },
+      {
+        id: 'ultra-status',
+        method: 'GET',
+        path: '/:instance_id/instance/status?token=TOKEN',
+        title: 'Instance status',
+        auth: false,
+        response: { status: 'authenticated', accountStatus: { status: 'authenticated' } },
+        notes: ['Values: initializing, qr, loading, authenticated, disconnected.'],
+      },
+      {
+        id: 'ultra-qr',
+        method: 'GET',
+        path: '/:instance_id/instance/qr?token=TOKEN',
+        title: 'Instance QR',
+        auth: false,
+        response: { status: 'qr', qrCode: '2@…' },
+      },
+    ],
   },
   {
     id: 'auth',
@@ -113,7 +192,7 @@ export const DOC_SECTIONS: DocSection[] = [
           success: true,
           status: 'running',
           apiBuild: API_BUILD,
-          features: ['contact-groups', 'campaigns', 'templates', 'inbox', 'integrations'],
+          features: ['contact-groups', 'campaigns', 'templates', 'integrations'],
         },
         notes: ['Also available at GET /api/health (public, before auth middleware).'],
       },
@@ -163,10 +242,15 @@ export const DOC_SECTIONS: DocSection[] = [
         method: 'POST',
         path: '/api/accounts',
         title: 'Add account',
-        description: 'Register a new WhatsApp account slot on the server.',
+        description: 'Creates a unique account id and an API token bound to it. Token is returned once.',
         auth: true,
-        body: { accountId: 'ibsprimary' },
-        response: { success: true, accountId: 'ibsprimary' },
+        body: {},
+        response: {
+          success: true,
+          accountId: 'wa_a1b2c3d4e5f6',
+          token: 'wsk_…',
+          keyPrefix: 'wsk_a1b2c3d4',
+        },
       },
       {
         id: 'account-qr-regenerate',
@@ -615,53 +699,6 @@ export const DOC_SECTIONS: DocSection[] = [
     ],
   },
   {
-    id: 'inbox',
-    title: 'Inbox',
-    description: 'Incoming WhatsApp messages and manual replies (requires linked account).',
-    endpoints: [
-      {
-        id: 'list-inbox',
-        method: 'GET',
-        path: '/api/inbox?accountId=&search=&unreadOnly=0&limit=30&offset=0',
-        title: 'List messages',
-        auth: true,
-        params: [
-          { name: 'accountId', type: 'string', description: 'Filter by WhatsApp account.' },
-          { name: 'unreadOnly', type: 'boolean', description: '1 to show unread inbound only.' },
-          SEARCH_PARAM,
-          ...PAGINATION_PARAMS,
-        ],
-        response: { success: true, messages: [], unread: 0, total: 0 },
-      },
-      {
-        id: 'inbox-conversation',
-        method: 'GET',
-        path: '/api/inbox/conversation/:accountId/:phone',
-        title: 'Conversation thread',
-        auth: true,
-        response: { success: true, messages: [] },
-      },
-      {
-        id: 'inbox-reply',
-        method: 'POST',
-        path: '/api/inbox/reply',
-        title: 'Reply to contact',
-        auth: true,
-        body: { accountId: 'work', phoneNumber: '9647807110011', message: 'Thanks for reaching out!' },
-        response: { success: true, result: { success: true, phone: '9647807110011' } },
-      },
-      {
-        id: 'inbox-mark-read',
-        method: 'POST',
-        path: '/api/inbox/read',
-        title: 'Mark as read',
-        auth: true,
-        body: { ids: [1, 2, 3] },
-        response: { success: true, marked: 3 },
-      },
-    ],
-  },
-  {
     id: 'auto-replies',
     title: 'Auto-replies',
     description: 'Automatic responses when inbound messages match keywords (or any message).',
@@ -816,7 +853,7 @@ export const DOC_SECTIONS: DocSection[] = [
   {
     id: 'realtime',
     title: 'WebSocket',
-    description: 'Live events for inbox, campaigns, and account status (same host as API).',
+    description: 'Live events for campaigns and account status (same host as API).',
     endpoints: [
       {
         id: 'websocket',
@@ -1024,7 +1061,6 @@ export const DOC_QUICK_START = [
   'GET /api/accounts/:id/status — poll until ready',
   'POST /api/contact-groups — create group and import numbers',
   'POST /api/campaigns/send — broadcast to group (or schedule with scheduledAt)',
-  'GET /api/inbox — read inbound messages; POST /api/inbox/reply to respond',
 ]
 
 export const DOC_ERRORS = [

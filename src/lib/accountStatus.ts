@@ -6,17 +6,6 @@ export interface ParsedAccountStatus {
   raw: Record<string, unknown>
 }
 
-const CONNECTED_VALUES = new Set([
-  'connected',
-  'open',
-  'ready',
-  'online',
-  'authenticated',
-  'logged_in',
-  'loggedin',
-  'active',
-])
-
 const CONNECTING_VALUES = new Set([
   'connecting',
   'pairing',
@@ -28,134 +17,115 @@ const CONNECTING_VALUES = new Set([
   'authenticated',
 ])
 
+const DISCONNECTED_VALUES = new Set([
+  'disconnected',
+  'close',
+  'closed',
+  'offline',
+  'logout',
+  'unpaired',
+  'logged_out',
+  'failed',
+])
+
 function norm(value: unknown): string {
-  return String(value).trim().toLowerCase()
+  return String(value ?? '').trim().toLowerCase()
 }
 
-function boolConnected(value: unknown): boolean | null {
+function boolFlag(value: unknown): boolean | null {
   if (typeof value === 'boolean') return value
   if (value === 1 || value === '1' || value === 'true') return true
   if (value === 0 || value === '0' || value === 'false') return false
   return null
 }
 
-function stateFromString(value: string): ConnectionState | null {
-  if (CONNECTED_VALUES.has(value)) return 'connected'
-  if (CONNECTING_VALUES.has(value)) return 'connecting'
-  if (
-    ['disconnected', 'close', 'closed', 'offline', 'logout', 'unpaired', 'logged_out', 'failed'].includes(
-      value,
-    )
-  ) {
-    return 'disconnected'
-  }
-  return null
-}
-
-function labelsFor(state: ConnectionState): string {
+function labelsFor(state: ConnectionState, extra?: string): string {
+  if (extra) return extra
   switch (state) {
     case 'connected':
-      return 'Connected'
+      return 'جاهز للإرسال'
     case 'connecting':
-      return 'Connecting…'
+      return 'جارٍ الربط…'
     case 'disconnected':
-      return 'Disconnected'
+      return 'غير مرتبط'
     default:
-      return 'Unknown'
+      return 'غير معروف'
   }
+}
+
+function pickSource(raw: Record<string, unknown>): Record<string, unknown> {
+  const nestedCandidates = [raw.status, raw.data, raw.account, raw.instance, raw.session]
+  const nested = nestedCandidates.find((v) => v && typeof v === 'object') as
+    | Record<string, unknown>
+    | undefined
+  return nested ? { ...raw, ...nested } : raw
 }
 
 export function parseAccountStatus(data: unknown): ParsedAccountStatus {
   const raw =
-    data && typeof data === 'object'
-      ? (data as Record<string, unknown>)
-      : {}
+    data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+  const src = pickSource(raw)
 
-  const nestedCandidates = [
-    raw.status,
-    raw.data,
-    raw.account,
-    raw.instance,
-    raw.session,
-  ]
-  const nested = nestedCandidates.find(
-    (v) => v && typeof v === 'object',
-  ) as Record<string, unknown> | undefined
+  const status = norm(src.status)
+  const liveState = norm(src.liveState ?? src.state)
+  const inMemory = boolFlag(src.inMemory)
+  const sessionActive = boolFlag(src.sessionActive)
+  const needsQr = src.needsQr === true
+  const ready = boolFlag(src.ready) === true || boolFlag(src.isReady) === true
 
-  const sources = [raw, nested].filter(Boolean) as Record<string, unknown>[]
-
-  for (const src of sources) {
-    for (const key of [
-      'connected',
-      'isConnected',
-      'isReady',
-      'ready',
-      'authenticated',
-      'loggedIn',
-    ]) {
-      const b = boolConnected(src[key])
-      if (b === true) {
-        return { state: 'connected', label: 'Connected', raw }
-      }
-      if (b === false && key === 'connected') {
-        return { state: 'disconnected', label: 'Disconnected', raw }
-      }
+  if (inMemory === false || sessionActive === false) {
+    return {
+      state: 'disconnected',
+      label: needsQr || status === 'qr' ? 'يحتاج مسح QR' : labelsFor('disconnected'),
+      raw,
     }
+  }
 
-    for (const key of [
-      'status',
-      'state',
-      'liveState',
-      'connectionState',
-      'connection',
-      'connectionStatus',
-      'linkStatus',
-      'sessionState',
-    ]) {
-      const val = src[key]
-      if (typeof val === 'string') {
-        const s = stateFromString(norm(val))
-        if (s) {
-          return { state: s, label: labelsFor(s), raw }
-        }
-      }
-    }
+  if (status === 'ready') {
+    return { state: 'connected', label: labelsFor('connected'), raw }
+  }
 
-    if (src.needsQr === true && !boolConnected(src.connected)) {
-      return { state: 'connecting', label: 'Needs QR', raw }
-    }
+  if (status === 'qr' || needsQr || liveState === 'qr') {
+    return { state: 'connecting', label: 'يحتاج مسح QR', raw }
+  }
 
-    if (src.sessionActive === true) {
-      return { state: 'connected', label: 'Connected', raw }
-    }
+  if (CONNECTING_VALUES.has(status) || CONNECTING_VALUES.has(liveState)) {
+    return { state: 'connecting', label: labelsFor('connecting'), raw }
+  }
+
+  if (DISCONNECTED_VALUES.has(status) || DISCONNECTED_VALUES.has(liveState)) {
+    return { state: 'disconnected', label: labelsFor('disconnected'), raw }
+  }
+
+  if (ready && (!status || status === 'ready')) {
+    return { state: 'connected', label: labelsFor('connected'), raw }
   }
 
   if (raw.success === true && typeof raw.message === 'string') {
-    const s = stateFromString(norm(raw.message))
-    if (s) {
-      return { state: s, label: labelsFor(s), raw }
+    const msg = norm(raw.message)
+    if (CONNECTING_VALUES.has(msg)) {
+      return { state: 'connecting', label: labelsFor('connecting'), raw }
+    }
+    if (DISCONNECTED_VALUES.has(msg)) {
+      return { state: 'disconnected', label: labelsFor('disconnected'), raw }
     }
   }
 
-  return { state: 'unknown', label: 'Unknown', raw }
+  return { state: 'unknown', label: labelsFor('unknown'), raw }
 }
 
 export function isAccountConnected(data: unknown): boolean {
   return parseAccountStatus(data).state === 'connected'
 }
 
-/** True only when backend lifecycle status is exactly "ready" and session is live. */
+/** True only when the WhatsApp session is live and ready to send. */
 export function isAccountReady(data: unknown): boolean {
-  const raw =
-    data && typeof data === 'object'
-      ? (data as Record<string, unknown>)
-      : {}
+  const parsed = parseAccountStatus(data)
+  if (parsed.state !== 'connected') return false
+  const raw = parsed.raw
   const status = String(raw.status ?? '').trim().toLowerCase()
-  if (status === 'ready') {
-    if (raw.inMemory === false) return false
-    if (raw.sessionActive === false) return false
-    return true
-  }
   if (status && status !== 'ready') return false
-  return isAccountConnected(data)
+  if (raw.inMemory === false) return false
+  if (raw.sessionActive === false) return false
+  return true
 }

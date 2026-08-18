@@ -20,15 +20,15 @@ import type { AdminWaAccount } from '../types/models'
 
 function statusLabel(acc: AdminWaAccount): { text: string; className: string } {
   if (acc.isConnected || acc.isReady) {
-    return { text: 'Connected', className: 'bg-wa-green/15 text-wa-green' }
+    return { text: 'متصل', className: 'bg-emerald-50 text-emerald-700' }
   }
   if (acc.hasQrCode || acc.liveState === 'INITIALIZING') {
-    return { text: 'Awaiting scan', className: 'bg-amber-500/15 text-amber-300' }
+    return { text: 'بانتظار المسح', className: 'bg-amber-50 text-amber-700' }
   }
   if (acc.initError) {
-    return { text: 'Error', className: 'bg-red-500/15 text-red-300' }
+    return { text: 'خطأ', className: 'bg-red-50 text-red-700' }
   }
-  return { text: 'Offline', className: 'bg-border/40 text-muted' }
+  return { text: 'غير متصل', className: 'bg-slate-100 text-slate-600' }
 }
 
 export function AdminAccountsPanel() {
@@ -54,7 +54,7 @@ export function AdminAccountsPanel() {
       setAccounts(await api.listAllAccountsAdmin())
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Failed to load accounts',
+        err instanceof ApiClientError ? err.message : 'تعذّر تحميل الحسابات',
       )
       setAccounts([])
     } finally {
@@ -96,7 +96,7 @@ export function AdminAccountsPanel() {
       setSuccess(okMessage)
       await load()
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Action failed')
+      setError(err instanceof ApiClientError ? err.message : 'فشل الإجراء')
     } finally {
       setActionKey(null)
     }
@@ -104,62 +104,62 @@ export function AdminAccountsPanel() {
 
   async function handleClearAllStuck() {
     const ok = await confirmDialog({
-      title: 'Clear all stuck sessions',
+      title: 'مسح كل الجلسات العالقة',
       message:
-        'Stop and wipe every non-ready WhatsApp session on the server (all users)? Ready accounts will not be touched.',
-      confirmLabel: 'Clear all stuck',
+        'إيقاف ومسح كل جلسات واتساب غير الجاهزة على الخادم (لكل المستخدمين)؟ الحسابات الجاهزة لن تُمس.',
+      confirmLabel: 'مسح العالقة',
       variant: 'danger',
     })
     if (!ok) return
     await runAction(
       'clear-all-stuck',
       () => api.adminClearStuckSessions(),
-      'Stuck sessions cleared',
+      'تم مسح الجلسات العالقة',
     )
   }
 
   async function handleDisconnect(acc: AdminWaAccount) {
     const ok = await confirmDialog({
-      title: 'Stop session',
-      message: `Stop WhatsApp for "${acc.accountId}" (user ${acc.ownerUsername ?? acc.userId})? The account stays in the database.`,
-      confirmLabel: 'Stop',
+      title: 'إيقاف الجلسة',
+      message: `إيقاف واتساب للحساب "${acc.accountId}" (المستخدم ${acc.ownerUsername ?? acc.userId})؟ الحساب يبقى في قاعدة البيانات.`,
+      confirmLabel: 'إيقاف',
       variant: 'danger',
     })
     if (!ok) return
     await runAction(
       `dc-${acc.userId}-${acc.accountId}`,
       () => api.adminDisconnectAccount(acc.userId, acc.accountId),
-      `Session stopped for ${acc.accountId}`,
+      `أُوقفت الجلسة لـ ${acc.accountId}`,
     )
   }
 
   async function handleReset(acc: AdminWaAccount) {
     const ok = await confirmDialog({
-      title: 'Reset session',
-      message: `Clear session files for "${acc.accountId}" and prepare a new QR?`,
-      confirmLabel: 'Reset',
+      title: 'إعادة تعيين الجلسة',
+      message: `مسح ملفات الجلسة لـ "${acc.accountId}" وتجهيز رمز QR جديد؟`,
+      confirmLabel: 'إعادة تعيين',
       variant: 'danger',
     })
     if (!ok) return
     await runAction(
       `rs-${acc.userId}-${acc.accountId}`,
       () => api.adminResetSession(acc.userId, acc.accountId),
-      `Session reset for ${acc.accountId}`,
+      `أُعيد تعيين جلسة ${acc.accountId}`,
     )
   }
 
   async function handleDelete(acc: AdminWaAccount) {
     const ok = await confirmDialog({
-      title: 'Delete account',
-      message: `Permanently delete "${acc.accountId}" for user ${acc.ownerUsername ?? acc.userId}?`,
-      confirmLabel: 'Delete',
+      title: 'حذف الحساب',
+      message: `حذف "${acc.accountId}" نهائياً للمستخدم ${acc.ownerUsername ?? acc.userId}؟`,
+      confirmLabel: 'حذف',
       variant: 'danger',
     })
     if (!ok) return
     await runAction(
       `del-${acc.userId}-${acc.accountId}`,
       () => api.adminDeleteAccount(acc.userId, acc.accountId),
-      `Deleted ${acc.accountId}`,
+      `حُذف ${acc.accountId}`,
     )
   }
 
@@ -177,38 +177,41 @@ export function AdminAccountsPanel() {
       })
       if (parsed.ok) await load()
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'QR fetch failed')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر جلب رمز QR')
     } finally {
       setActionKey(null)
     }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {error && (
-        <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
+        <Alert variant="error" title="خطأ" onDismiss={() => setError(null)}>
           {error}
         </Alert>
       )}
       {success && (
-        <Alert variant="success" title="Done" onDismiss={() => setSuccess(null)}>
+        <Alert variant="success" title="تم" onDismiss={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
-      <Card title="All WhatsApp accounts" description="GET /api/admin/accounts">
+      <Card
+        title="كل حسابات واتساب"
+        description="إدارة جلسات كل المستخدمين من مكان واحد"
+      >
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div className="min-w-[200px] flex-1">
             <Input
-              label="Filter"
+              label="تصفية"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="account, user id, username…"
+              placeholder="الحساب، رقم المستخدم، اسم المستخدم…"
             />
           </div>
           <Button variant="secondary" loading={loading} onClick={load}>
             <RefreshCw className="h-4 w-4" />
-            Refresh
+            تحديث
           </Button>
           <Button
             variant="danger"
@@ -216,28 +219,32 @@ export function AdminAccountsPanel() {
             onClick={handleClearAllStuck}
           >
             <Eraser className="h-4 w-4" />
-            Clear stuck sessions
+            مسح الجلسات العالقة
           </Button>
         </div>
 
         {loading && accounts.length === 0 ? (
-          <p className="text-sm text-muted">Loading…</p>
+          <div className="space-y-2">
+            <div className="skeleton h-12 rounded-[14px]" />
+            <div className="skeleton h-12 rounded-[14px]" />
+            <div className="skeleton h-12 rounded-[14px]" />
+          </div>
         ) : filtered.length === 0 ? (
-          <Alert variant="info" title="No accounts">
-            No WhatsApp accounts match your filter.
+          <Alert variant="info" title="لا توجد حسابات">
+            لا توجد حسابات واتساب تطابق التصفية.
           </Alert>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[900px] text-left text-sm">
+            <div className="overflow-x-auto rounded-[16px] bg-slate-50">
+              <table className="w-full min-w-[900px] text-start text-[15px]">
                 <thead>
-                  <tr className="border-b border-border bg-panel text-xs text-muted">
-                    <th className="px-3 py-2 font-medium">User</th>
-                    <th className="px-3 py-2 font-medium">Account</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Memory</th>
-                    <th className="px-3 py-2 font-medium">State</th>
-                    <th className="px-3 py-2 font-medium text-right">Actions</th>
+                  <tr className="text-[13px] text-muted">
+                    <th className="px-4 py-3 font-medium">المستخدم</th>
+                    <th className="px-4 py-3 font-medium">الحساب</th>
+                    <th className="px-4 py-3 font-medium">الحالة</th>
+                    <th className="px-4 py-3 font-medium">الذاكرة</th>
+                    <th className="px-4 py-3 font-medium">الحالة الحية</th>
+                    <th className="px-4 py-3 text-end font-medium">إجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -247,35 +254,37 @@ export function AdminAccountsPanel() {
                   return (
                     <tr
                       key={base}
-                      className="border-b border-border/60 last:border-0 hover:bg-panel/40"
+                      className="border-t border-white hover:bg-white/70"
                     >
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-3">
                         <p className="font-medium text-text">
                           {acc.ownerUsername ?? '—'}
                         </p>
-                        <p className="text-xs text-muted">ID {acc.userId}</p>
+                        <p className="text-[13px] text-muted">المعرّف {acc.userId}</p>
                       </td>
-                      <td className="px-3 py-2 font-mono text-xs">{acc.accountId}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-3 font-mono text-[13px]" dir="ltr">
+                        {acc.accountId}
+                      </td>
+                      <td className="px-4 py-3">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${st.className}`}
+                          className={`rounded-full px-2 py-0.5 text-[13px] font-medium ${st.className}`}
                         >
                           {st.text}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-xs text-muted">
-                        {acc.inMemory ? 'Loaded' : '—'}
+                      <td className="px-4 py-3 text-[13px] text-muted">
+                        {acc.inMemory ? 'محمّل' : '—'}
                       </td>
-                      <td className="max-w-[140px] truncate px-3 py-2 text-xs text-muted">
+                      <td className="max-w-[140px] truncate px-4 py-3 text-[13px] text-muted" dir="ltr">
                         {acc.liveState ?? acc.initError ?? '—'}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-3">
                         <div className="flex flex-wrap justify-end gap-1">
                           <Button
                             variant="ghost"
                             loading={actionKey === `qr-${base}`}
                             onClick={() => handleQr(acc, false)}
-                            title="Fetch QR"
+                            title="جلب رمز QR"
                           >
                             <QrCode className="h-4 w-4" />
                           </Button>
@@ -283,7 +292,7 @@ export function AdminAccountsPanel() {
                             variant="ghost"
                             loading={actionKey === `rs-${base}`}
                             onClick={() => handleReset(acc)}
-                            title="Reset session"
+                            title="إعادة تعيين الجلسة"
                           >
                             <RotateCcw className="h-4 w-4" />
                           </Button>
@@ -291,7 +300,7 @@ export function AdminAccountsPanel() {
                             variant="ghost"
                             loading={actionKey === `dc-${base}`}
                             onClick={() => handleDisconnect(acc)}
-                            title="Stop session"
+                            title="إيقاف الجلسة"
                           >
                             <Pause className="h-4 w-4" />
                           </Button>
@@ -299,7 +308,7 @@ export function AdminAccountsPanel() {
                             variant="danger"
                             loading={actionKey === `del-${base}`}
                             onClick={() => handleDelete(acc)}
-                            title="Delete"
+                            title="حذف"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -327,23 +336,23 @@ export function AdminAccountsPanel() {
       </Card>
 
       {qrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="max-w-md rounded-xl border border-border bg-panel p-5 shadow-xl">
-            <h3 className="mb-1 text-lg font-semibold">QR — {qrModal.account.accountId}</h3>
-            <p className="mb-4 text-sm text-muted">
-              User: {qrModal.account.ownerUsername ?? qrModal.account.userId}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-w-md rounded-[16px] bg-white p-6 shadow-[0px_8px_24px_rgba(15,23,42,0.16)]">
+            <h3 className="mb-1 text-lg font-semibold">رمز QR — {qrModal.account.accountId}</h3>
+            <p className="mb-4 text-[15px] text-muted">
+              المستخدم: {qrModal.account.ownerUsername ?? qrModal.account.userId}
             </p>
             {qrModal.imageSrc ? (
-              <div className="mb-4 flex justify-center rounded-lg bg-white p-4">
+              <div className="mb-4 flex justify-center rounded-[16px] bg-slate-50 p-4">
                 <img
                   src={qrModal.imageSrc}
-                  alt="WhatsApp QR"
+                  alt="رمز QR لواتساب"
                   className="h-56 w-56 object-contain"
                 />
               </div>
             ) : (
-              <Alert variant="error" title="QR unavailable" className="mb-4">
-                {qrModal.error ?? 'No QR in response'}
+              <Alert variant="error" title="رمز QR غير متاح" className="mb-4">
+                {qrModal.error ?? 'لا يوجد رمز في الاستجابة'}
               </Alert>
             )}
             <div className="flex flex-wrap gap-2">
@@ -352,10 +361,10 @@ export function AdminAccountsPanel() {
                 loading={actionKey === `qr-${qrModal.account.userId}-${qrModal.account.accountId}`}
                 onClick={() => handleQr(qrModal.account, true)}
               >
-                New QR (reset)
+                QR جديد (إعادة تعيين)
               </Button>
               <Button variant="ghost" onClick={() => setQrModal(null)}>
-                Close
+                إغلاق
               </Button>
             </div>
           </div>

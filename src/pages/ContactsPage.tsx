@@ -1,11 +1,13 @@
-import { FileSpreadsheet, Plus, Trash2, Upload, Users } from 'lucide-react'
+import { FileSpreadsheet, Megaphone, Plus, Trash2, Upload, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Textarea } from '../components/ui/Textarea'
 import { ListToolbar } from '../components/ui/ListToolbar'
+import { KpiCard, PageHeader } from '../components/ui/PageHeader'
 import { Pagination, DEFAULT_PAGE_SIZE } from '../components/ui/Pagination'
 import { useConfirm } from '../context/ConfirmContext'
 import { api, ApiClientError } from '../lib/api'
@@ -13,6 +15,7 @@ import { formatPhoneCount, parsePhonesFromFile, parsePhonesFromText } from '../l
 import type { ContactGroup, ContactGroupNumber } from '../types/contacts'
 
 type ImportMode = 'manual' | 'file'
+type DetailTab = 'import' | 'numbers'
 
 export function ContactsPage() {
   const confirmDialog = useConfirm()
@@ -30,6 +33,7 @@ export function ContactsPage() {
   const [manualText, setManualText] = useState('')
   const [importPreview, setImportPreview] = useState<string[]>([])
   const [replaceOnImport, setReplaceOnImport] = useState(false)
+  const [detailTab, setDetailTab] = useState<DetailTab>('import')
 
   const [groupSearch, setGroupSearch] = useState('')
   const [groupsPage, setGroupsPage] = useState(1)
@@ -61,7 +65,7 @@ export function ContactsPage() {
         setSelectedId(page.items[0].id)
       }
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Failed to load groups')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر تحميل المجموعات')
     } finally {
       setLoading(false)
     }
@@ -104,24 +108,37 @@ export function ContactsPage() {
     }
   }, [selectedId, loadNumbers])
 
+  function selectGroup(id: number, preferImport = false) {
+    setSelectedId(id)
+    const group = groups.find((g) => g.id === id)
+    setDetailTab(preferImport || !group?.numberCount ? 'import' : 'numbers')
+  }
+
   async function createGroup() {
     if (!newName.trim()) {
-      setError('Enter a group name')
+      setError('أدخل اسم المجموعة')
       return
     }
     setActionLoading('create')
     setError(null)
     try {
-      await api.createContactGroup({
+      const data = await api.createContactGroup({
         name: newName.trim(),
         description: newDescription.trim() || undefined,
       })
+      const row = data as Record<string, unknown>
+      const nested = row.group as Record<string, unknown> | undefined
+      const createdId = Number(nested?.id ?? row.id ?? row.groupId)
       setNewName('')
       setNewDescription('')
-      setSuccess('Group created')
+      setSuccess('أُنشئت المجموعة — أضف إليها أرقاماً الآن')
+      if (Number.isFinite(createdId) && createdId > 0) {
+        setSelectedId(createdId)
+        setDetailTab('import')
+      }
       await loadGroups()
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Failed to create group')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر إنشاء المجموعة')
     } finally {
       setActionLoading(null)
     }
@@ -129,9 +146,9 @@ export function ContactsPage() {
 
   async function removeGroup(group: ContactGroup) {
     const ok = await confirmDialog({
-      title: 'Delete group',
-      message: `Delete "${group.name}" and all ${group.numberCount} numbers?`,
-      confirmLabel: 'Delete',
+      title: 'حذف المجموعة',
+      message: `حذف «${group.name}» وكل ${formatPhoneCount(group.numberCount)}؟`,
+      confirmLabel: 'حذف',
       variant: 'danger',
     })
     if (!ok) return
@@ -139,10 +156,10 @@ export function ContactsPage() {
     try {
       await api.deleteContactGroup(group.id)
       if (selectedId === group.id) setSelectedId(null)
-      setSuccess('Group deleted')
+      setSuccess('حُذفت المجموعة')
       await loadGroups()
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Delete failed')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر الحذف')
     } finally {
       setActionLoading(null)
     }
@@ -155,9 +172,9 @@ export function ContactsPage() {
       const parsed = await parsePhonesFromFile(file)
       setImportPreview(parsed)
       setManualText(parsed.join('\n'))
-      setSuccess(`Found ${formatPhoneCount(parsed.length)} in file`)
+      setSuccess(`وُجد ${formatPhoneCount(parsed.length)} في الملف`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not read file')
+      setError(err instanceof Error ? err.message : 'تعذّر قراءة الملف')
       setImportPreview([])
     } finally {
       setActionLoading(null)
@@ -167,6 +184,7 @@ export function ContactsPage() {
   function previewManual() {
     const parsed = parsePhonesFromText(manualText)
     setImportPreview(parsed)
+    if (!parsed.length) setError('لم يُعثر على أرقام صالحة')
   }
 
   async function importNumbers() {
@@ -174,7 +192,7 @@ export function ContactsPage() {
     const list =
       importPreview.length > 0 ? importPreview : parsePhonesFromText(manualText)
     if (!list.length) {
-      setError('No valid numbers to import')
+      setError('لا توجد أرقام صالحة للاستيراد')
       return
     }
     setActionLoading('import')
@@ -184,15 +202,16 @@ export function ContactsPage() {
       const added = Number((res as Record<string, unknown>).added ?? list.length)
       setSuccess(
         replaceOnImport
-          ? `Replaced with ${formatPhoneCount(list.length)}`
-          : `Added ${added} new numbers (${formatPhoneCount(list.length)} in import)`,
+          ? `استُبدل بـ ${formatPhoneCount(list.length)}`
+          : `أُضيف ${added} رقماً جديداً (${formatPhoneCount(list.length)} في الاستيراد)`,
       )
       setManualText('')
       setImportPreview([])
+      setDetailTab('numbers')
       await loadGroups()
       await loadNumbers(selectedId)
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Import failed')
+      setError(err instanceof ApiClientError ? err.message : 'فشل الاستيراد')
     } finally {
       setActionLoading(null)
     }
@@ -206,100 +225,129 @@ export function ContactsPage() {
       await loadNumbers(selectedId)
       await loadGroups()
     } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : 'Delete failed')
+      setError(err instanceof ApiClientError ? err.message : 'تعذّر الحذف')
     } finally {
       setActionLoading(null)
     }
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">Contact groups</h1>
-        <p className="mt-1 text-sm text-muted">
-          Save lists of phone numbers — import from Excel or paste manually, then use them in campaigns
-        </p>
-      </header>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHeader
+        title="جهات الاتصال"
+        description="أنشئ مجموعة، أضف الأرقام، ثم استخدمها في الحملات."
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:gap-6">
+        <KpiCard label="المجموعات" value={String(groupsTotal)} />
+        <KpiCard
+          label="أرقام المجموعة المحددة"
+          value={selectedGroup ? String(selectedGroup.numberCount) : '—'}
+          hint={selectedGroup ? selectedGroup.name : 'اختر مجموعة من القائمة'}
+        />
+      </div>
 
       {error && (
-        <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
+        <Alert variant="error" title="خطأ" onDismiss={() => setError(null)}>
           {error}
         </Alert>
       )}
       {success && (
-        <Alert variant="success" title="Done" onDismiss={() => setSuccess(null)}>
+        <Alert variant="success" title="تم" onDismiss={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
-      <Card
-        title="New group"
-        description="e.g. Customers, VIP, Baghdad region"
-        action={<Plus className="h-4 w-4 text-muted" />}
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input
-            label="Group name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="My customers"
-          />
-          <Input
-            label="Description (optional)"
-            value={newDescription}
-            onChange={(e) => setNewDescription(e.target.value)}
-            placeholder="Notes about this list"
-          />
-        </div>
-        <Button className="mt-4" loading={actionLoading === 'create'} onClick={createGroup}>
-          Create group
-        </Button>
-      </Card>
+      <div className="grid items-start gap-6 lg:grid-cols-12">
+        <Card title="مجموعاتك" description="اختر مجموعة للعمل عليها" className="lg:col-span-4">
+          <div className="mb-6 space-y-3 rounded-[16px] bg-slate-50 p-4">
+            <p className="text-[15px] font-semibold text-text">مجموعة جديدة</p>
+            <Input
+              label="اسم المجموعة"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="عملاء بغداد"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createGroup()
+              }}
+            />
+            <Input
+              label="وصف (اختياري)"
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="قائمة للحملات الأسبوعية"
+            />
+            <Button
+              className="w-full"
+              loading={actionLoading === 'create'}
+              onClick={createGroup}
+            >
+              <Plus className="h-4 w-4" />
+              إنشاء المجموعة
+            </Button>
+          </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Your groups" className="lg:col-span-1">
           <ListToolbar
             search={groupSearch}
             onSearchChange={setGroupSearch}
-            searchPlaceholder="Filter groups…"
-            className="mb-2"
+            searchPlaceholder="ابحث باسم المجموعة…"
+            className="mb-3"
           />
+
           {loading && groups.length === 0 ? (
-            <p className="text-sm text-muted">Loading…</p>
+            <div className="space-y-2">
+              <div className="skeleton h-[72px] rounded-[16px]" />
+              <div className="skeleton h-[72px] rounded-[16px]" />
+            </div>
           ) : groups.length === 0 ? (
-            <p className="text-sm text-muted">No groups yet — create one above.</p>
+            <div className="rounded-[16px] bg-slate-50 px-4 py-8 text-center">
+              <Users className="mx-auto h-8 w-8 text-muted" />
+              <p className="mt-3 text-[15px] font-medium text-text">لا مجموعات بعد</p>
+              <p className="mt-1 text-[13px] text-muted">أنشئ أول مجموعة من النموذج أعلاه.</p>
+            </div>
           ) : (
             <ul className="space-y-2">
-              {groups.map((g) => (
-                <li key={g.id}>
-                  <div
-                    className={`flex items-center gap-2 rounded-lg border p-3 transition-colors ${
-                      selectedId === g.id
-                        ? 'border-wa-green/50 bg-wa-green/10'
-                        : 'border-border hover:border-wa-green/30'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => setSelectedId(g.id)}
+              {groups.map((g) => {
+                const active = selectedId === g.id
+                return (
+                  <li key={g.id}>
+                    <div
+                      className={`flex min-h-[72px] items-center gap-2 rounded-[16px] p-2 transition-colors ${
+                        active ? 'bg-primary-50 ring-2 ring-primary-500' : 'bg-slate-50 hover:bg-slate-100'
+                      }`}
                     >
-                      <p className="truncate font-medium text-text">{g.name}</p>
-                      <p className="text-xs text-muted">
-                        {formatPhoneCount(g.numberCount)}
-                      </p>
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg p-2 text-muted hover:bg-red-500/10 hover:text-red-400"
-                      onClick={() => removeGroup(g)}
-                      disabled={actionLoading === `del-g-${g.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </li>
-              ))}
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-3 p-2 text-start"
+                        onClick={() => selectGroup(g.id)}
+                      >
+                        <div
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] ${
+                            active ? 'bg-primary-500 text-white' : 'bg-white text-muted'
+                          }`}
+                        >
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-text">{g.name}</p>
+                          <p className="mt-0.5 text-[13px] text-muted">
+                            {formatPhoneCount(g.numberCount)}
+                          </p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] text-muted hover:bg-red-50 hover:text-danger"
+                        onClick={() => removeGroup(g)}
+                        disabled={actionLoading === `del-g-${g.id}`}
+                        aria-label={`حذف ${g.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
           <Pagination
@@ -317,142 +365,204 @@ export function ContactsPage() {
         </Card>
 
         {selectedGroup ? (
-          <div className="space-y-4 lg:col-span-2">
+          <div className="space-y-6 lg:col-span-8">
             <Card
               title={selectedGroup.name}
-              description={`${formatPhoneCount(selectedGroup.numberCount)} total in this group`}
-              action={<Users className="h-4 w-4 text-muted" />}
+              description={
+                selectedGroup.description?.trim() ||
+                `${formatPhoneCount(selectedGroup.numberCount)} في هذه المجموعة`
+              }
+              action={
+                selectedGroup.numberCount > 0 ? (
+                  <Link to="/campaigns">
+                    <Button variant="secondary">
+                      <Megaphone className="h-4 w-4" />
+                      استخدام في حملة
+                    </Button>
+                  </Link>
+                ) : undefined
+              }
             >
-              <div className="mb-4 flex rounded-lg border border-border bg-panel p-1">
-                {(['manual', 'file'] as ImportMode[]).map((mode) => (
+              <div className="flex gap-1 rounded-[16px] bg-slate-50 p-1">
+                {(
+                  [
+                    { id: 'import' as const, label: 'إضافة أرقام' },
+                    { id: 'numbers' as const, label: `الأرقام (${selectedGroup.numberCount})` },
+                  ]
+                ).map((tab) => (
                   <button
-                    key={mode}
+                    key={tab.id}
                     type="button"
-                    onClick={() => setImportMode(mode)}
-                    className={`flex-1 rounded-md py-2 text-sm font-medium capitalize ${
-                      importMode === mode
-                        ? 'bg-card text-text shadow-sm'
+                    onClick={() => setDetailTab(tab.id)}
+                    className={`min-h-11 flex-1 rounded-[14px] px-4 text-[15px] font-semibold transition-colors ${
+                      detailTab === tab.id
+                        ? 'bg-white text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]'
                         : 'text-muted hover:text-text'
                     }`}
                   >
-                    {mode === 'manual' ? 'Paste numbers' : 'Excel / CSV file'}
+                    {tab.label}
                   </button>
                 ))}
               </div>
 
-              {importMode === 'manual' ? (
-                <div className="space-y-3">
-                  <Textarea
-                    label="Phone numbers"
-                    value={manualText}
-                    onChange={(e) => setManualText(e.target.value)}
-                    rows={6}
-                    placeholder={'9647807110011\n9647xxxxxxxx\n...'}
-                    hint="One per line, or comma-separated. Country code without +"
-                  />
-                  <Button variant="secondary" onClick={previewManual}>
-                    Preview count
+              {detailTab === 'import' ? (
+                <div className="mt-6 space-y-4">
+                  <p className="text-[13px] leading-relaxed text-muted">
+                    الصق الأرقام أو ارفع ملف Excel/CSV. يُقبل رمز الدولة بدون +.
+                  </p>
+
+                  <div className="flex gap-1 rounded-[16px] bg-slate-50 p-1">
+                    {([
+                      { id: 'manual' as const, label: 'لصق الأرقام' },
+                      { id: 'file' as const, label: 'ملف Excel / CSV' },
+                    ]).map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setImportMode(mode.id)}
+                        className={`min-h-11 flex-1 rounded-[14px] px-4 text-[15px] font-semibold transition-colors ${
+                          importMode === mode.id
+                            ? 'bg-white text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]'
+                            : 'text-muted hover:text-text'
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {importMode === 'manual' ? (
+                    <div className="space-y-3">
+                      <Textarea
+                        label="أرقام الهواتف"
+                        value={manualText}
+                        onChange={(e) => setManualText(e.target.value)}
+                        rows={6}
+                        placeholder={'9647807110011\n9647xxxxxxxx'}
+                        hint="رقم في كل سطر، أو مفصولة بفواصل"
+                      />
+                      <Button variant="secondary" onClick={previewManual}>
+                        معاينة العدد
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label className="block space-y-2">
+                        <span className="block text-[15px] font-medium text-text">
+                          ارفع ملفاً
+                        </span>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv,.txt"
+                          onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
+                          className="block w-full text-[15px] text-muted file:me-3 file:rounded-[14px] file:border-0 file:bg-primary-50 file:px-4 file:py-2 file:text-[15px] file:font-medium file:text-primary-700"
+                        />
+                      </label>
+                      <p className="text-[13px] text-muted">
+                        تُفحص كل الأعمدة — أي خلية برقم صالح تُستورد.
+                      </p>
+                    </div>
+                  )}
+
+                  {importPreview.length > 0 && (
+                    <div className="rounded-[16px] bg-emerald-50 px-4 py-3 text-[15px] font-medium text-emerald-800">
+                      جاهز للاستيراد: {formatPhoneCount(importPreview.length)}
+                    </div>
+                  )}
+
+                  <label className="flex items-center gap-2 text-[15px] text-muted">
+                    <input
+                      type="checkbox"
+                      checked={replaceOnImport}
+                      onChange={(e) => setReplaceOnImport(e.target.checked)}
+                      className="rounded border-border"
+                    />
+                    استبدال الأرقام الحالية بدل الإضافة إليها
+                  </label>
+
+                  <Button
+                    className="w-full sm:w-auto"
+                    loading={actionLoading === 'import' || actionLoading === 'parse'}
+                    onClick={importNumbers}
+                  >
+                    <Upload className="h-4 w-4" />
+                    استيراد الأرقام
+                  </Button>
+                </div>
+              ) : numbersTotal === 0 ? (
+                <div className="mt-6 rounded-[16px] bg-slate-50 px-4 py-10 text-center">
+                  <FileSpreadsheet className="mx-auto h-8 w-8 text-muted" />
+                  <p className="mt-3 text-[15px] font-medium text-text">لا أرقام في هذه المجموعة</p>
+                  <p className="mt-1 text-[13px] text-muted">انتقل إلى «إضافة أرقام» للصق قائمة أو رفع ملف.</p>
+                  <Button className="mt-4" onClick={() => setDetailTab('import')}>
+                    إضافة أرقام
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium text-muted">
-                      Upload .xlsx, .xls or .csv
-                    </span>
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv,.txt"
-                      onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
-                      className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-wa-green/15 file:px-3 file:py-2 file:font-medium file:text-wa-green"
-                    />
-                  </label>
-                  <p className="text-xs text-muted">
-                    All columns are scanned — any cell with a valid phone number is imported.
-                  </p>
-                </div>
-              )}
-
-              {importPreview.length > 0 && (
-                <p className="mt-2 text-sm text-wa-green">
-                  Ready to import: {formatPhoneCount(importPreview.length)}
-                </p>
-              )}
-
-              <label className="mt-3 flex items-center gap-2 text-sm text-muted">
-                <input
-                  type="checkbox"
-                  checked={replaceOnImport}
-                  onChange={(e) => setReplaceOnImport(e.target.checked)}
-                  className="rounded border-border"
-                />
-                Replace existing numbers (instead of adding)
-              </label>
-
-              <Button
-                className="mt-4"
-                loading={actionLoading === 'import' || actionLoading === 'parse'}
-                onClick={importNumbers}
-              >
-                <Upload className="h-4 w-4" />
-                Import numbers
-              </Button>
-            </Card>
-
-            {numbersTotal > 0 && (
-              <Card title="Numbers in group">
-                <ListToolbar
-                  search={numberSearch}
-                  onSearchChange={setNumberSearch}
-                  searchPlaceholder="Filter phone numbers…"
-                />
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-panel text-xs text-muted">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">Phone</th>
-                        <th className="px-3 py-2 text-right font-medium">Remove</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {numbers.map((n) => (
-                        <tr key={n.id} className="border-t border-border/60">
-                          <td className="px-3 py-2 font-mono text-xs">{n.phoneNumber}</td>
-                          <td className="px-3 py-2 text-right">
-                            <button
-                              type="button"
-                              className="text-muted hover:text-red-400"
-                              disabled={actionLoading === `del-n-${n.id}`}
-                              onClick={() => removeNumber(n)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </td>
+                <div className="mt-6">
+                  <ListToolbar
+                    search={numberSearch}
+                    onSearchChange={setNumberSearch}
+                    searchPlaceholder="ابحث برقم الهاتف…"
+                  />
+                  <div className="overflow-x-auto rounded-[16px] bg-slate-50">
+                    <table className="w-full text-start text-[15px]">
+                      <thead>
+                        <tr className="text-[13px] text-muted">
+                          <th className="px-4 py-3 font-medium">الهاتف</th>
+                          <th className="px-4 py-3 font-medium">إزالة</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {numbers.map((n) => (
+                          <tr key={n.id} className="border-t border-white">
+                            <td className="px-4 py-3 font-mono text-[13px]" dir="ltr">
+                              {n.phoneNumber}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                className="flex h-11 w-11 items-center justify-center rounded-[14px] text-muted hover:bg-red-50 hover:text-danger"
+                                disabled={actionLoading === `del-n-${n.id}`}
+                                onClick={() => removeNumber(n)}
+                                aria-label={`حذف ${n.phoneNumber}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination
+                    page={numbersPage}
+                    totalPages={numbersTotalPages}
+                    total={numbersTotal}
+                    pageSize={numbersPageSize}
+                    onPageChange={setNumbersPage}
+                    onPageSizeChange={(size) => {
+                      setNumbersPageSize(size)
+                      setNumbersPage(1)
+                    }}
+                    pageSizeOptions={[20, 50, 100]}
+                  />
                 </div>
-                <Pagination
-                  page={numbersPage}
-                  totalPages={numbersTotalPages}
-                  total={numbersTotal}
-                  pageSize={numbersPageSize}
-                  onPageChange={setNumbersPage}
-                  onPageSizeChange={(size) => {
-                    setNumbersPageSize(size)
-                    setNumbersPage(1)
-                  }}
-                  pageSizeOptions={[20, 50, 100]}
-                />
-              </Card>
-            )}
+              )}
+            </Card>
           </div>
         ) : (
-          <Card title="Select a group" className="lg:col-span-2">
-            <div className="flex flex-col items-center gap-3 py-8 text-center text-muted">
-              <FileSpreadsheet className="h-10 w-10 opacity-50" />
-              <p className="text-sm">Choose a group from the list to add or import numbers.</p>
+          <Card title="ابدأ من هنا" className="lg:col-span-8">
+            <div className="flex flex-col items-start gap-4 rounded-[16px] bg-slate-50 p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-[16px] bg-white text-muted shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+                <Users className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-[15px] font-semibold text-text">لا توجد مجموعة محددة</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                  أنشئ مجموعة من العمود الجانبي، ثم أضف الأرقام لاستخدامها في الحملات.
+                </p>
+              </div>
             </div>
           </Card>
         )}

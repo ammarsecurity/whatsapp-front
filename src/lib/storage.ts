@@ -7,9 +7,9 @@ const USER_KEY = 'wa_user'
 
 export const DEFAULT_API_URL =
   import.meta.env.VITE_API_URL?.replace(/\/$/, '') ||
-  'http://74.50.65.142:8489'
+  'https://whatsapp-api.smartstick-iq.com'
 
-/** Strip trailing /api so paths like /api/inbox are not doubled */
+/** Strip trailing /api so paths like /api/messages are not doubled */
 export function normalizeApiBase(url: string): string {
   return url.replace(/\/$/, '').replace(/\/api$/i, '')
 }

@@ -1,5 +1,7 @@
 export interface WaAccount {
   accountId: string
+  note?: string | null
+  token?: string | null
   status?: string
   liveState?: string
   phone?: string

@@ -12,7 +12,7 @@ interface ListToolbarProps {
 export function ListToolbar({
   search,
   onSearchChange,
-  searchPlaceholder = 'Search…',
+  searchPlaceholder = 'بحث…',
   children,
   className = '',
 }: ListToolbarProps) {
@@ -20,7 +20,7 @@ export function ListToolbar({
     <div className={`mb-4 flex flex-wrap items-end gap-3 ${className}`}>
       <div className="min-w-[180px] flex-1">
         <Input
-          label="Search"
+          label="بحث"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={searchPlaceholder}
@@ -45,7 +45,7 @@ export function FilterSelect({ label, value, onChange, options }: FilterSelectPr
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-border bg-panel px-3 py-2.5 text-sm text-text outline-none focus:border-wa-green"
+        className="min-h-11 w-full rounded-[14px] border border-border bg-white px-4 text-[15px] text-text outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

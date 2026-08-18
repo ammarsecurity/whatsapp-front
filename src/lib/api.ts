@@ -32,7 +32,6 @@ import type {
   ApiKeyRecord,
   AutoReplyRule,
   CampaignRecipient,
-  InboxMessage,
   MessageTemplate,
   OptOutEntry,
   UserQuota,
@@ -329,11 +328,24 @@ export const api = {
     )
   },
 
-  addAccount(body: AddAccountRequest) {
-    return request<Record<string, unknown>>('/api/accounts', {
+  addAccount(body: AddAccountRequest = {}) {
+    return request<{
+      success?: boolean
+      accountId?: string
+      note?: string
+      token?: string | null
+      keyPrefix?: string | null
+    }>('/api/accounts', {
       method: 'POST',
       body: JSON.stringify(body),
     })
+  },
+
+  updateAccountNote(accountId: string, note: string) {
+    return request<{ accountId: string; note: string }>(
+      `/api/accounts/${encodeURIComponent(accountId)}`,
+      { method: 'PATCH', body: JSON.stringify({ note }) },
+    )
   },
 
   addAccountByPath(accountId: string) {
@@ -785,55 +797,6 @@ export const api = {
     })
   },
 
-  async listInbox(params: {
-    accountId?: string
-    search?: string
-    unreadOnly?: boolean
-    limit?: number
-    offset?: number
-  } = {}): Promise<PaginatedResult<InboxMessage> & { unread: number }> {
-    const q = new URLSearchParams()
-    if (params.accountId) q.set('accountId', params.accountId)
-    if (params.search) q.set('search', params.search)
-    if (params.unreadOnly) q.set('unreadOnly', '1')
-    if (params.limit != null) q.set('limit', String(params.limit))
-    if (params.offset != null) q.set('offset', String(params.offset))
-    const qs = q.toString()
-    const data = await request<unknown>(`/api/inbox${qs ? `?${qs}` : ''}`)
-    const o = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
-    const list = Array.isArray(o.messages) ? o.messages : []
-    const items = list.map(parseInboxMessage)
-    const paged = buildPaginated(
-      items,
-      Number(o.total ?? items.length),
-      Number(o.limit ?? params.limit ?? 30),
-      Number(o.offset ?? params.offset ?? 0),
-    )
-    return { ...paged, unread: Number(o.unread ?? 0) }
-  },
-
-  async getInboxConversation(accountId: string, phone: string) {
-    const data = await request<Record<string, unknown>>(
-      `/api/inbox/conversation/${encodeURIComponent(accountId)}/${encodeURIComponent(phone)}`,
-    )
-    const list = Array.isArray(data.messages) ? data.messages : []
-    return list.map(parseInboxMessage)
-  },
-
-  markInboxRead(ids: number[]) {
-    return request<Record<string, unknown>>('/api/inbox/read', {
-      method: 'POST',
-      body: JSON.stringify({ ids }),
-    })
-  },
-
-  replyInbox(accountId: string, phoneNumber: string, message: string) {
-    return request<Record<string, unknown>>('/api/inbox/reply', {
-      method: 'POST',
-      body: JSON.stringify({ accountId, phoneNumber, message }),
-    })
-  },
-
   async listAutoReplies(accountId?: string): Promise<AutoReplyRule[]> {
     const q = accountId ? `?accountId=${encodeURIComponent(accountId)}` : ''
     const data = await request<Record<string, unknown>>(`/api/auto-replies${q}`)
@@ -880,6 +843,8 @@ export const api = {
         id: Number(row.id),
         name: String(row.name ?? ''),
         keyPrefix: String(row.keyPrefix ?? row.key_prefix ?? ''),
+        accountId: row.accountId != null ? String(row.accountId) : row.account_id != null ? String(row.account_id) : null,
+        token: row.token != null ? String(row.token) : row.token_plain != null ? String(row.token_plain) : null,
         lastUsedAt: row.lastUsedAt != null ? String(row.lastUsedAt) : null,
         expiresAt: row.expiresAt != null ? String(row.expiresAt) : null,
         createdAt: row.createdAt != null ? String(row.createdAt) : undefined,
@@ -887,10 +852,18 @@ export const api = {
     })
   },
 
-  createApiKey(name: string, expiresAt?: string) {
-    return request<{ key: { id: number; name: string; keyPrefix: string; secret: string } }>(
+  createApiKey(name: string, expiresAt?: string, accountId?: string) {
+    return request<{
+      key: {
+        id: number
+        name: string
+        keyPrefix: string
+        accountId?: string | null
+        secret: string
+      }
+    }>(
       '/api/integrations/api-keys',
-      { method: 'POST', body: JSON.stringify({ name, expiresAt }) },
+      { method: 'POST', body: JSON.stringify({ name, expiresAt, accountId }) },
     )
   },
 
@@ -988,20 +961,6 @@ function parseTemplate(raw: unknown): MessageTemplate {
     body: String(t.body ?? ''),
     createdAt: t.createdAt != null ? String(t.createdAt) : undefined,
     updatedAt: t.updatedAt != null ? String(t.updatedAt) : undefined,
-  }
-}
-
-function parseInboxMessage(raw: unknown): InboxMessage {
-  const m = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  return {
-    id: Number(m.id),
-    accountId: String(m.accountId ?? m.account_id ?? ''),
-    phoneNumber: String(m.phoneNumber ?? m.phone_number ?? ''),
-    contactName: m.contactName != null ? String(m.contactName) : m.contact_name != null ? String(m.contact_name) : null,
-    body: String(m.body ?? ''),
-    direction: (m.direction === 'out' ? 'out' : 'in') as InboxMessage['direction'],
-    isRead: !!(m.isRead ?? m.is_read),
-    createdAt: m.createdAt != null ? String(m.createdAt) : undefined,
   }
 }
 

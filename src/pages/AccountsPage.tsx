@@ -1,23 +1,38 @@
-import { Eraser, QrCode, UserPlus } from 'lucide-react'
+import {
+  CheckCircle2,
+  Eraser,
+  QrCode,
+  RefreshCw,
+  Smartphone,
+  Trash2,
+  Unplug,
+  UserPlus,
+  Wifi,
+  WifiOff,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AccountPicker } from '../components/AccountPicker'
-import { ConnectionBadge } from '../components/ConnectionBadge'
 import { JsonBlock } from '../components/JsonBlock'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { CopyRow } from '../components/ui/CopyRow'
 import { Input } from '../components/ui/Input'
+import { PageHeader } from '../components/ui/PageHeader'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAccounts } from '../context/AccountContext'
 import { api, ApiClientError } from '../lib/api'
-import { formatAccountLabel, slugifyAccountName } from '../lib/accountDisplay'
+import { formatAccountLabel } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
 import { parseQrApiResponse } from '../lib/qr'
+import { getApiUrl } from '../lib/storage'
 
 export function AccountsPage() {
   const confirmDialog = useConfirm()
   const {
     selectedAccountId,
+    selectedAccount,
     selectAccount,
     refreshAccounts,
     selectedLiveStatus,
@@ -26,7 +41,13 @@ export function AccountsPage() {
     refreshSelectedLiveStatus,
   } = useAccounts()
 
-  const [newAccountName, setNewAccountName] = useState('')
+  const [createdCreds, setCreatedCreds] = useState<{
+    accountId: string
+    token: string | null
+  } | null>(null)
+  const [newNote, setNewNote] = useState('')
+  const [accountNote, setAccountNote] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
   const [qrData, setQrData] = useState<unknown>(null)
   const [qrImage, setQrImage] = useState<string | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
@@ -41,17 +62,30 @@ export function AccountsPage() {
   const refreshLinkStatus = refreshSelectedLiveStatus
 
   const accountReady = isAccountReady(linkStatus?.raw)
-  const isLinked =
-    accountReady || linkStatus?.state === 'connected'
-  const displayName = selectedAccountId
-    ? formatAccountLabel(selectedAccountId)
-    : ''
+  const isLinked = accountReady || linkStatus?.state === 'connected'
+  const displayName = selectedAccount
+    ? formatAccountLabel(selectedAccount.accountId, selectedAccount.note)
+    : selectedAccountId
+      ? formatAccountLabel(selectedAccountId)
+      : ''
+
+  useEffect(() => {
+    setAccountNote(selectedAccount?.note || '')
+  }, [selectedAccountId, selectedAccount?.note])
 
   useEffect(() => {
     setQrData(null)
     setQrImage(null)
     setWatchConnection(false)
   }, [selectedAccountId])
+
+  useEffect(() => {
+    if (window.location.hash !== '#add-account') return
+    document.getElementById('add-account')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    window.setTimeout(() => {
+    document.getElementById('add-account-btn')?.focus()
+    }, 300)
+  }, [])
 
   async function applyQrResponse(data: unknown) {
     setQrData(data)
@@ -74,32 +108,50 @@ export function AccountsPage() {
   }
 
   async function addAccount() {
-    const slug = slugifyAccountName(newAccountName)
-    if (!newAccountName.trim()) {
-      setError('Enter a name for this WhatsApp account')
-      return
-    }
-    await run('add', () => api.addAccount({ accountId: slug }), async () => {
-      selectAccount(slug)
-      setNewAccountName('')
-      setSuccess(`"${formatAccountLabel(slug)}" added — scan the QR code to link`)
+    await run(
+      'add',
+      () => api.addAccount({ note: newNote.trim() || undefined }),
+      async (data) => {
+      const payload = (data ?? {}) as {
+        accountId?: string
+        token?: string | null
+      }
+      const id = String(payload.accountId || '').trim()
+      if (!id) {
+        setError('أُنشئ الحساب لكن المعرّف لم يُرجع')
+        return
+      }
+      selectAccount(id)
+      setCreatedCreds({
+        accountId: id,
+        token: payload.token ? String(payload.token) : null,
+      })
+      setNewNote('')
       await refreshAccounts()
-      await fetchQrForAccount(false)
+      setWatchConnection(true)
+      try {
+        const qr = await api.getQr(id, false)
+        await applyQrResponse(qr)
+      } catch (err) {
+        setError(
+          err instanceof ApiClientError ? err.message : 'تعذّر جلب رمز QR',
+        )
+      }
     })
   }
 
   async function disconnectSelectedAccount() {
     if (!selectedAccountId) return
     const ok = await confirmDialog({
-      title: 'Disconnect WhatsApp',
-      message: `Unlink "${displayName}" from this server? The account stays in your list — you can link again with a QR code.`,
-      confirmLabel: 'Disconnect',
+      title: 'فصل واتساب',
+      message: `فصل «${displayName}» عن الخادم؟ الحساب يبقى في قائمتك ويمكن ربطه لاحقاً بمسح QR.`,
+      confirmLabel: 'فصل',
       variant: 'danger',
     })
     if (!ok) return
     const id = selectedAccountId
     await run('disconnect', () => api.disconnectAccount(id), async () => {
-      setSuccess(`"${displayName}" disconnected`)
+      setSuccess(`فُصل «${displayName}»`)
       setQrData(null)
       setQrImage(null)
       setWatchConnection(false)
@@ -110,10 +162,10 @@ export function AccountsPage() {
 
   async function clearStuckSessions() {
     const ok = await confirmDialog({
-      title: 'Clear stuck sessions',
+      title: 'مسح الجلسات العالقة',
       message:
-        'Stop and remove all pending WhatsApp sessions (QR, pairing, disconnected) that are not ready to send? Ready accounts will not be affected. You can link again with QR afterward.',
-      confirmLabel: 'Clear stuck sessions',
+        'إيقاف وإزالة جلسات واتساب المعلقة (QR، الربط، غير المتصلة) التي ليست جاهزة للإرسال؟ الحسابات الجاهزة لن تتأثر. يمكن الربط لاحقاً بمسح QR.',
+      confirmLabel: 'مسح العالقة',
       variant: 'danger',
     })
     if (!ok) return
@@ -122,8 +174,8 @@ export function AccountsPage() {
       setSuccess(
         result.message ??
           (result.clearedCount
-            ? `Cleared ${result.clearedCount} stuck session(s).`
-            : 'No stuck sessions found.'),
+            ? `تم مسح ${result.clearedCount} جلسة عالقة.`
+            : 'لا توجد جلسات عالقة.'),
       )
       setQrData(null)
       setQrImage(null)
@@ -136,15 +188,15 @@ export function AccountsPage() {
   async function deleteSelectedAccount() {
     if (!selectedAccountId) return
     const ok = await confirmDialog({
-      title: 'Remove account',
-      message: `Remove "${displayName}" from the server? You will need to link again with a new QR.`,
-      confirmLabel: 'Remove',
+      title: 'حذف الحساب',
+      message: `حذف «${displayName}» من الخادم؟ ستحتاج إلى ربطه من جديد برمز QR.`,
+      confirmLabel: 'حذف',
       variant: 'danger',
     })
     if (!ok) return
     const id = selectedAccountId
     await run(`delete-${id}`, () => api.deleteAccount(id), async () => {
-      setSuccess(`"${displayName}" removed`)
+      setSuccess(`حُذف «${displayName}»`)
       setQrData(null)
       setQrImage(null)
       await refreshAccounts()
@@ -164,40 +216,50 @@ export function AccountsPage() {
       await onSuccess?.(data)
     } catch (err) {
       setError(
-        err instanceof ApiClientError ? err.message : 'Something went wrong',
+        err instanceof ApiClientError ? err.message : 'حدث خطأ غير متوقع',
       )
     } finally {
       setLoading(null)
     }
   }
 
+  const statusLabel = accountReady
+    ? 'جاهز للإرسال'
+    : watchConnection && !linkStatus
+      ? 'جارٍ التحقق من الاتصال…'
+      : linkStatus?.label ?? 'غير مرتبط'
+
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">WhatsApp accounts</h1>
-        <p className="mt-1 text-sm text-muted">
-          Add your numbers, link them with QR, and switch between them anytime
-        </p>
-      </header>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHeader
+        title="حسابات واتساب"
+        description="أضف أرقامك، اربطها بمسح QR، وبدّل بينها في أي وقت."
+      />
 
       {error && (
-        <Alert variant="error" title="Error" onDismiss={() => setError(null)}>
+        <Alert variant="error" title="خطأ" onDismiss={() => setError(null)}>
           {error}
         </Alert>
       )}
       {success && (
-        <Alert variant="success" title="Done" onDismiss={() => setSuccess(null)}>
+        <Alert variant="success" title="تم" onDismiss={() => setSuccess(null)}>
           {success}
         </Alert>
       )}
 
-      <Card title="Your accounts">
-        <AccountPicker showStatus={false} />
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
-          <p className="min-w-[200px] flex-1 text-sm text-muted">
-            If an account shows the wrong status or send/check hangs, clear stuck
-            sessions on the server (QR, pairing, disconnected). Ready accounts stay
-            connected.
+      <Card title="حساباتك">
+        <AccountPicker
+          showStatus={false}
+          onAddAccount={() => {
+            document.getElementById('add-account')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            window.setTimeout(() => {
+            document.getElementById('add-account-btn')?.focus()
+            }, 300)
+          }}
+        />
+        <div className="mt-4 flex flex-wrap items-center gap-3 pt-4">
+          <p className="min-w-[200px] flex-1 text-[13px] text-muted">
+            إذا ظهرت حالة خاطئة أو علقت الإرسال/التحقق، امسح الجلسات العالقة على الخادم. الحسابات الجاهزة تبقى متصلة.
           </p>
           <Button
             variant="secondary"
@@ -205,142 +267,326 @@ export function AccountsPage() {
             onClick={clearStuckSessions}
           >
             <Eraser className="h-4 w-4" />
-            Clear stuck sessions
+            مسح الجلسات العالقة
           </Button>
         </div>
       </Card>
 
-      <Card
-        title="Add a new WhatsApp"
-        description="Give it a name you will recognize — e.g. Work, Sales, Support"
-        action={<UserPlus className="h-4 w-4 text-muted" />}
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[200px] flex-1">
-            <Input
-              label="Account name"
-              value={newAccountName}
-              onChange={(e) => setNewAccountName(e.target.value)}
-              placeholder="Work phone"
-              hint={
-                newAccountName.trim()
-                  ? `Will be saved as: ${slugifyAccountName(newAccountName)}`
-                  : 'Use letters and numbers only'
-              }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') addAccount()
-              }}
-            />
+      <Card id="add-account" className="scroll-mt-24">
+        <div className="grid items-start gap-8 lg:grid-cols-12">
+          <div className="space-y-6 lg:col-span-7">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-primary-50 text-primary-700">
+                <UserPlus className="h-6 w-6" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-text">إضافة رقم واتساب</h2>
+                <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                  يُنشأ معرّف عشوائي وتوكن ثابت مرتبط به، ثم تربطه بمسح QR من هاتفك.
+                </p>
+              </div>
+            </div>
+
+            <div className="max-w-[700px]">
+              <Input
+                label="ملاحظة (اختياري)"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="مثال: حساب شركة الأفق"
+                maxLength={160}
+              />
+            </div>
+
+            <Button
+              id="add-account-btn"
+              loading={loading === 'add'}
+              onClick={addAccount}
+            >
+              <UserPlus className="h-4 w-4" />
+              إضافة الحساب
+            </Button>
+
+            {createdCreds && (
+              <Alert
+                variant="info"
+                title="بيانات الإرسال محفوظة ويمكن نسخها لاحقاً من الإعدادات"
+                onDismiss={() => setCreatedCreds(null)}
+              >
+                <div className="mt-3 space-y-2">
+                  <CopyRow label="عنوان الخادم" value={getApiUrl()} />
+                  <CopyRow label="instance_id" value={createdCreds.accountId} />
+                  {createdCreds.token ? (
+                    <CopyRow label="token" value={createdCreds.token} />
+                  ) : (
+                    <p className="text-[13px] text-muted">
+                      أُنشئ الحساب دون توكن. يمكنك إنشاء مفتاح من الإعدادات.
+                    </p>
+                  )}
+                </div>
+              </Alert>
+            )}
           </div>
-          <Button loading={loading === 'add'} onClick={addAccount}>
-            Add account
-          </Button>
+
+          <div className="rounded-[16px] bg-slate-50 p-5 lg:col-span-5">
+            <p className="mb-4 text-[15px] font-semibold text-text">كيف يعمل؟</p>
+            <ol className="space-y-4">
+              <li className="flex gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[13px] font-bold text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+                  1
+                </span>
+                <div>
+                  <p className="text-[15px] font-semibold text-text">أضف الحساب</p>
+                  <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                    يُولَّد معرّف فريد وتوكن للإرسال البرمجي.
+                  </p>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[13px] font-bold text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+                  2
+                </span>
+                <div>
+                  <p className="text-[15px] font-semibold text-text">انسخ التوكن</p>
+                  <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                    يظهر مع instance_id وعنوان الخادم، ويبقى ثابتاً في الإعدادات.
+                  </p>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[13px] font-bold text-primary-700 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+                  3
+                </span>
+                <div>
+                  <p className="text-[15px] font-semibold text-text">امسح رمز QR</p>
+                  <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                    من واتساب: الأجهزة المرتبطة ← ربط جهاز.
+                  </p>
+                </div>
+              </li>
+            </ol>
+          </div>
         </div>
       </Card>
 
       {selectedAccountId && (
-        <Card
-          title={`Link ${displayName}`}
-          description="Open WhatsApp on your phone → Linked devices → Link a device"
-          action={<QrCode className="h-4 w-4 text-muted" />}
-        >
-          <div className="mb-4 space-y-3">
-            {linkStatus ? (
-              <ConnectionBadge
-                state={accountReady ? 'connected' : linkStatus.state}
-                label={accountReady ? 'Ready to send messages' : linkStatus.label}
-                polling={statusPolling && !accountReady}
-              />
-            ) : watchConnection ? (
-              <ConnectionBadge state="connecting" label="Checking connection…" polling />
-            ) : null}
-
-            {accountReady && (
-              <Alert variant="success" title="Linked">
-                This account is connected. Go to Messages to send.
-              </Alert>
-            )}
-
-            {isLinked && !accountReady && (
-              <Alert variant="info" title="Connected">
-                WhatsApp is linked but still starting up. Wait a moment or refresh.
-              </Alert>
-            )}
-
-            {statusError && !accountReady && (
-              <Alert variant="error" title="Connection">
-                {statusError}
-              </Alert>
-            )}
+        <Card title={`ربط ${displayName}`}>
+          <div
+            className={`mb-6 flex items-start gap-4 rounded-[16px] px-4 py-4 ${
+              accountReady
+                ? 'bg-emerald-50'
+                : isLinked
+                  ? 'bg-amber-50'
+                  : 'bg-red-50'
+            }`}
+          >
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-white">
+              {accountReady ? (
+                <CheckCircle2 className="h-5 w-5 text-success" />
+              ) : isLinked ? (
+                <RefreshCw className="h-5 w-5 text-warning" />
+              ) : (
+                <WifiOff className="h-5 w-5 text-danger" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold text-text">{statusLabel}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-muted">
+                {accountReady
+                  ? 'الحساب متصل ويمكن الإرسال منه الآن.'
+                  : isLinked
+                    ? 'واتساب مرتبط وما زال يبدأ. انتظر قليلاً أو حدّث الحالة.'
+                    : 'افتح واتساب على الهاتف ثم الأجهزة المرتبطة ثم ربط جهاز، وامسح الرمز الظاهر هنا.'}
+              </p>
+              {statusError && !accountReady && (
+                <p className="mt-2 text-[13px] text-danger">{statusError}</p>
+              )}
+            </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            {!accountReady && (
+          <div className="mb-6 max-w-[700px]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="min-w-0 flex-1">
+                <Input
+                  label="ملاحظة"
+                  value={accountNote}
+                  onChange={(e) => setAccountNote(e.target.value)}
+                  placeholder="مثال: حساب شركة الأفق"
+                  maxLength={160}
+                />
+              </div>
               <Button
                 variant="secondary"
-                loading={loading === 'qr'}
-                onClick={() => fetchQrForAccount(false)}
+                loading={savingNote}
+                onClick={async () => {
+                  if (!selectedAccountId) return
+                  setSavingNote(true)
+                  try {
+                    await api.updateAccountNote(selectedAccountId, accountNote.trim())
+                    await refreshAccounts()
+                    setSuccess('حُفظت الملاحظة')
+                  } catch (err) {
+                    setError(
+                      err instanceof ApiClientError ? err.message : 'تعذّر حفظ الملاحظة',
+                    )
+                  } finally {
+                    setSavingNote(false)
+                  }
+                }}
               >
-                Show QR code
+                حفظ الملاحظة
               </Button>
-            )}
-            {isLinked && (
+            </div>
+          </div>
+
+          {accountReady ? (
+            <div className="flex flex-wrap gap-2">
+              <Link to="/messages">
+                <Button>
+                  <Smartphone className="h-4 w-4" />
+                  إرسال رسالة
+                </Button>
+              </Link>
               <Button
                 variant="secondary"
                 loading={loading === 'disconnect'}
                 onClick={disconnectSelectedAccount}
               >
-                Disconnect
+                <Unplug className="h-4 w-4" />
+                فصل الحساب
               </Button>
-            )}
-            <Button
-              variant="ghost"
-              loading={loading === 'reset'}
-              onClick={() => fetchQrForAccount(true)}
-            >
-              {isLinked ? 'Link another phone (new QR)' : 'Generate new QR'}
-            </Button>
-            {!watchConnection && !accountReady && (
-              <Button variant="ghost" onClick={() => setWatchConnection(true)}>
-                Check connection
+              <Button
+                variant="danger"
+                loading={loading === `delete-${selectedAccountId}`}
+                onClick={deleteSelectedAccount}
+              >
+                <Trash2 className="h-4 w-4" />
+                حذف الحساب
               </Button>
-            )}
-            <Button
-              variant="danger"
-              loading={loading === `delete-${selectedAccountId}`}
-              onClick={deleteSelectedAccount}
-            >
-              Remove account
-            </Button>
-          </div>
+            </div>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-12">
+              <div className="space-y-6 lg:col-span-6">
+                <ol className="space-y-4">
+                  <li className="flex gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-[13px] font-bold text-primary-700">
+                      1
+                    </span>
+                    <p className="pt-1 text-[15px] text-muted">اضغط «إظهار رمز QR» إذا لم يظهر الرمز.</p>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-[13px] font-bold text-primary-700">
+                      2
+                    </span>
+                    <p className="pt-1 text-[15px] text-muted">
+                      من الهاتف: واتساب ← الأجهزة المرتبطة ← ربط جهاز.
+                    </p>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-[13px] font-bold text-primary-700">
+                      3
+                    </span>
+                    <p className="pt-1 text-[15px] text-muted">امسح الرمز وانتظر حتى تظهر «جاهز للإرسال».</p>
+                  </li>
+                </ol>
 
-          {qrImage && !accountReady && (
-            <div className="mb-4 flex flex-col items-center gap-2 rounded-xl bg-white p-5">
-              <img
-                src={qrImage}
-                alt="WhatsApp QR code"
-                className="h-64 w-64 object-contain"
-              />
-              <p className="text-center text-xs text-gray-600">
-                Scan with WhatsApp → Linked devices → Link a device
-              </p>
-              {statusPolling && (
-                <p className="text-center text-xs text-amber-600">
-                  Waiting for scan…
-                </p>
+                <div className="space-y-3">
+                  <Button
+                    className="w-full"
+                    loading={loading === 'qr'}
+                    onClick={() => fetchQrForAccount(false)}
+                  >
+                    <QrCode className="h-4 w-4" />
+                    إظهار رمز QR
+                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      loading={loading === 'reset'}
+                      onClick={() => fetchQrForAccount(true)}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      توليد جديد
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      disabled={watchConnection}
+                      onClick={() => setWatchConnection(true)}
+                    >
+                      <Wifi className="h-4 w-4" />
+                      {watchConnection ? 'جارٍ الفحص…' : 'فحص الاتصال'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-6">
+                <div className="flex min-h-[280px] flex-col items-center justify-center rounded-[16px] bg-slate-50 p-6">
+                  {qrImage ? (
+                    <>
+                      <img
+                        src={qrImage}
+                        alt="رمز QR لواتساب"
+                        className="h-56 w-56 rounded-[14px] bg-white object-contain p-3 shadow-[0px_1px_3px_rgba(15,23,42,0.08)]"
+                      />
+                      <p className="mt-4 text-center text-[13px] text-muted">
+                        {statusPolling ? 'بانتظار المسح…' : 'امسح الرمز من هاتفك'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex h-16 w-16 items-center justify-center rounded-[16px] bg-white text-muted shadow-[0px_1px_3px_rgba(15,23,42,0.08)]">
+                        <QrCode className="h-8 w-8" />
+                      </div>
+                      <p className="mt-4 text-center text-[15px] font-medium text-text">
+                        الرمز سيظهر هنا
+                      </p>
+                      <p className="mt-1 text-center text-[13px] text-muted">
+                        اضغط إظهار رمز QR للبدء
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!accountReady && (
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              {isLinked ? (
+                <Button
+                  variant="secondary"
+                  loading={loading === 'disconnect'}
+                  onClick={disconnectSelectedAccount}
+                >
+                  <Unplug className="h-4 w-4" />
+                  فصل الحساب
+                </Button>
+              ) : (
+                <span />
               )}
+              <Button
+                variant="danger"
+                loading={loading === `delete-${selectedAccountId}`}
+                onClick={deleteSelectedAccount}
+              >
+                <Trash2 className="h-4 w-4" />
+                حذف الحساب
+              </Button>
             </div>
           )}
 
           {(linkStatus || qrData !== null) && (
             <details
+              className="mt-6"
               open={showTechnical}
               onToggle={(e) => setShowTechnical((e.target as HTMLDetailsElement).open)}
             >
-              <summary className="cursor-pointer text-xs text-muted hover:text-text">
-                Technical details (for developers)
+              <summary className="cursor-pointer text-[13px] font-medium text-muted hover:text-text">
+                تفاصيل تقنية للمطورين
               </summary>
-              <div className="mt-2 space-y-2">
+              <div className="mt-3 space-y-2">
                 {linkStatus && <JsonBlock data={linkStatus.raw} />}
                 {qrData !== null && !accountReady && <JsonBlock data={qrData} />}
               </div>

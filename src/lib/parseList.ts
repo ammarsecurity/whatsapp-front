@@ -65,6 +65,18 @@ function normalizeAccount(item: unknown): WaAccount {
       o.is_connected === 1 ||
       o.connected === true ||
       o.connected === 1,
+    note:
+      typeof o.note === 'string'
+        ? o.note
+        : typeof o.label === 'string'
+          ? o.label
+          : '',
+    token:
+      typeof o.token === 'string'
+        ? o.token
+        : typeof o.token_plain === 'string'
+          ? o.token_plain
+          : null,
   }
 }
 

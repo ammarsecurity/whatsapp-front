@@ -30,12 +30,12 @@ export function CodeBlock({
           {copied ? (
             <>
               <Check className="h-3 w-3 text-wa-green" />
-              Copied
+              نُسخ
             </>
           ) : (
             <>
               <Copy className="h-3 w-3" />
-              Copy
+              نسخ
             </>
           )}
         </button>

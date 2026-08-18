@@ -68,5 +68,5 @@ export async function parsePhonesFromFile(file: File): Promise<string[]> {
 }
 
 export function formatPhoneCount(n: number): string {
-  return `${n} number${n === 1 ? '' : 's'}`
+  return `${n} رقم`
 }

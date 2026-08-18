@@ -12,12 +12,24 @@ export function slugifyAccountName(name: string): string {
   return slug || 'whatsapp'
 }
 
-/** Show account slug in a human-readable way (Work Phone, Sales Team). */
-export function formatAccountLabel(accountId: string): string {
-  if (!accountId.trim()) return 'Unnamed account'
+/** Show a friendly note when set; otherwise the technical account id. */
+export function formatAccountLabel(accountId: string, note?: string | null): string {
+  const label = String(note || '').trim()
+  if (label) return label
+  if (!accountId.trim()) return 'حساب بدون اسم'
+  if (/^wa_[a-f0-9]+$/i.test(accountId)) return accountId
   return accountId
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function accountTitle(acc: { accountId: string; note?: string | null } | null | undefined): string {
+  if (!acc) return 'حساب بدون اسم'
+  return formatAccountLabel(acc.accountId, acc.note)
+}
+
+export function sameAccountId(a?: string | null, b?: string | null): boolean {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 }
 
 export type AccountStatusMeta = {
@@ -37,17 +49,17 @@ export function accountStatusLabel(acc: {
   const liveState = String(acc.liveState ?? '').toLowerCase()
 
   if (status === 'ready') {
-    return { label: 'Ready to send', tone: 'ready' }
+    return { label: 'جاهز للإرسال', tone: 'ready' }
   }
 
   if (['qr', 'loading', 'initializing', 'authenticated'].includes(status)) {
     return status === 'qr'
-      ? { label: 'Needs QR', tone: 'connecting' }
-      : { label: 'Connecting…', tone: 'connecting' }
+      ? { label: 'يحتاج مسح QR', tone: 'connecting' }
+      : { label: 'جارٍ الربط…', tone: 'connecting' }
   }
 
   if (['logged_out', 'failed', 'disconnected'].includes(status)) {
-    return { label: 'Not linked', tone: 'offline' }
+    return { label: 'غير مرتبط', tone: 'offline' }
   }
 
   if (
@@ -55,18 +67,18 @@ export function accountStatusLabel(acc: {
       liveState,
     )
   ) {
-    return { label: 'Not linked', tone: 'offline' }
+    return { label: 'غير مرتبط', tone: 'offline' }
   }
 
   if (acc.isReady || acc.ready) {
-    return { label: 'Ready to send', tone: 'ready' }
+    return { label: 'جاهز للإرسال', tone: 'ready' }
   }
 
   if (acc.isConnected || acc.connected) {
-    return { label: 'Connected', tone: 'ready' }
+    return { label: 'يحتاج مسح QR', tone: 'connecting' }
   }
 
-  return { label: 'Not linked', tone: 'offline' }
+  return { label: 'غير مرتبط', tone: 'offline' }
 }
 
 /** Prefer live poll data; fall back to list entry when poll is unavailable. */
@@ -76,27 +88,26 @@ export function liveStatusDisplayMeta(
 ): AccountStatusMeta {
   if (live) {
     if (isAccountReady(live.raw)) {
-      return { label: 'Ready to send', tone: 'ready' }
+      return { label: 'جاهز للإرسال', tone: 'ready' }
     }
     if (live.state === 'connecting') {
-      const status = String(live.raw.status ?? '').toLowerCase()
-      if (status === 'qr') {
-        return { label: 'Needs QR', tone: 'connecting' }
-      }
-      return { label: 'Connecting…', tone: 'connecting' }
+      return { label: live.label || 'جارٍ الربط…', tone: 'connecting' }
     }
     if (live.state === 'disconnected') {
-      return { label: 'Not linked', tone: 'offline' }
+      if (live.raw.needsQr === true || String(live.raw.status ?? '').toLowerCase() === 'qr') {
+        return { label: 'يحتاج مسح QR', tone: 'connecting' }
+      }
+      return { label: live.label || 'غير مرتبط', tone: 'offline' }
     }
     return { label: live.label, tone: 'unknown' }
   }
   if (fallback) return accountStatusLabel(fallback)
-  return { label: 'Unknown', tone: 'unknown' }
+  return { label: 'غير معروف', tone: 'unknown' }
 }
 
 export const ACCOUNT_STATUS_STYLES = {
-  ready: 'bg-wa-green/20 text-wa-green',
-  connecting: 'bg-amber-500/15 text-amber-300',
-  offline: 'bg-red-500/10 text-red-300',
-  unknown: 'bg-border/50 text-muted',
+  ready: 'bg-emerald-50 text-emerald-700',
+  connecting: 'bg-amber-50 text-amber-700',
+  offline: 'bg-red-50 text-red-700',
+  unknown: 'bg-slate-100 text-slate-600',
 } as const

@@ -81,10 +81,10 @@ export function AccountsList({
   const statusColor = (
     state?: AccountWithLiveStatus['connectionState'],
   ) => {
-    if (state === 'connected') return 'bg-wa-green/20 text-wa-green'
-    if (state === 'connecting') return 'bg-amber-500/15 text-amber-300'
-    if (state === 'disconnected') return 'bg-red-500/10 text-red-300'
-    return 'bg-border/50 text-muted'
+    if (state === 'connected') return 'bg-emerald-50 text-emerald-700'
+    if (state === 'connecting') return 'bg-amber-50 text-amber-700'
+    if (state === 'disconnected') return 'bg-red-50 text-red-700'
+    return 'bg-slate-100 text-slate-600'
   }
 
   return (
