@@ -1,0 +1,133 @@
+import type { DocEndpoint } from '../../data/apiDocs'
+import { getApiUrl } from '../../lib/storage'
+import { MethodBadge } from './MethodBadge'
+import { CodeBlock } from './CodeBlock'
+
+function buildCurl(endpoint: DocEndpoint, baseUrl: string): string {
+  const path = endpoint.path
+    .replace(':accountId', 'work')
+    .replace(':userId', '1')
+    .replace(':groupId', '1')
+    .replace(':campaignId', '10')
+    .replace(':phone', '9647807110011')
+    .replace(':id', '1')
+  const url = `${baseUrl}${path.split('?')[0]}`
+  const lines = [`curl -X ${endpoint.method} "${url}"`]
+  if (endpoint.body) {
+    lines.push(`  -H "Content-Type: application/json"`)
+    lines.push(`  -d '${JSON.stringify(endpoint.body)}'`)
+  }
+  if (endpoint.auth) {
+    lines.push(`  -H "Authorization: <your_jwt_token>"`)
+    lines.push(`  # Or: -H "X-API-Key: wsk_..."`)
+  }
+  return lines.join(' \\\n')
+}
+
+export function EndpointDoc({ endpoint }: { endpoint: DocEndpoint }) {
+  const base = getApiUrl()
+
+  return (
+    <article
+      id={endpoint.id}
+      className="scroll-mt-24 rounded-xl border border-border bg-card/50 p-5"
+    >
+      <div className="mb-3 flex flex-wrap items-start gap-3">
+        <MethodBadge method={endpoint.method} />
+        <code className="min-w-0 flex-1 break-all font-mono text-sm text-text">
+          {endpoint.path}
+        </code>
+      </div>
+
+      <h3 className="text-base font-semibold text-text">{endpoint.title}</h3>
+      <p className="mt-1 text-sm leading-relaxed text-muted">
+        {endpoint.description ?? endpoint.title}
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        <span
+          className={`rounded-full px-2 py-0.5 font-medium ${
+            endpoint.auth
+              ? 'bg-wa-green/10 text-wa-green'
+              : 'bg-border/60 text-muted'
+          }`}
+        >
+          {endpoint.auth ? 'يتطلب مصادقة' : 'عام'}
+        </span>
+      </div>
+
+      {endpoint.params && endpoint.params.length > 0 && (
+        <div className="mt-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            المعاملات
+          </h4>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-start text-sm">
+              <thead>
+                <tr className="border-b border-border bg-panel text-xs text-muted">
+                  <th className="px-3 py-2 font-medium">الاسم</th>
+                  <th className="px-3 py-2 font-medium">النوع</th>
+                  <th className="px-3 py-2 font-medium">مطلوب</th>
+                  <th className="px-3 py-2 font-medium">الوصف</th>
+                </tr>
+              </thead>
+              <tbody>
+                {endpoint.params.map((p) => (
+                  <tr
+                    key={p.name}
+                    className="border-b border-border/50 last:border-0"
+                  >
+                    <td className="px-3 py-2 font-mono text-xs text-wa-green">
+                      {p.name}
+                    </td>
+                    <td className="px-3 py-2 text-muted">{p.type}</td>
+                    <td className="px-3 py-2 text-muted">
+                      {p.required ? 'نعم' : 'لا'}
+                    </td>
+                    <td className="px-3 py-2 text-muted">{p.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {endpoint.body && (
+        <div className="mt-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            جسم الطلب
+          </h4>
+          <CodeBlock code={JSON.stringify(endpoint.body, null, 2)} />
+        </div>
+      )}
+
+      {endpoint.response && (
+        <div className="mt-4">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            مثال الاستجابة
+          </h4>
+          <CodeBlock code={JSON.stringify(endpoint.response, null, 2)} />
+        </div>
+      )}
+
+      <div className="mt-4">
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+          مثال cURL
+        </h4>
+        <CodeBlock code={buildCurl(endpoint, base)} language="bash" />
+      </div>
+
+      {endpoint.notes && endpoint.notes.length > 0 && (
+        <ul className="mt-4 space-y-1.5 border-t border-border pt-4 text-sm text-muted">
+          {endpoint.notes.map((note) => (
+            <li key={note} className="flex gap-2">
+              <span className="text-wa-green">•</span>
+              {note}
+            </li>
+          ))}
+        </ul>
+      )}
+    </article>
+  )
+}

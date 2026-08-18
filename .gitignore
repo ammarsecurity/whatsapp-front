@@ -1,0 +1,36 @@
+# Secrets & deploy credentials
+host.text
+*.tgz
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+front/dist/
+dist/
+dist-ssr/
+
+# WhatsApp sessions & uploads
+.wwebjs_auth/
+.wwebjs_cache/
+uploads/
+
+# Logs & OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cursor / local assets
+assets/
