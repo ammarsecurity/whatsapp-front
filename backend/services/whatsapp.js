@@ -96,10 +96,58 @@ class WhatsAppService {
     this.lastSendAtMs = new Map(); // Map<accountKey, number>
     this.loadAccountsFromDb(); // Load accounts from database on startup
     this._startSessionKeepalive();
+    this._startIdleUnloader();
+  }
+
+  _qrParkAfter() {
+    return Math.max(3, parseInt(process.env.WA_QR_PARK_AFTER || '6', 10) || 6);
+  }
+
+  _touchAccount(account) {
+    if (account) account.lastUsedAt = Date.now();
+  }
+
+  _startIdleUnloader() {
+    const idleMs = parseInt(process.env.WA_IDLE_UNLOAD_MS || '900000', 10);
+    if (!Number.isFinite(idleMs) || idleMs <= 0) return;
+    setInterval(() => {
+      this._unloadIdleSessions().catch((err) => {
+        console.warn('[idle-unload] tick failed:', err.message);
+      });
+    }, 60000);
+  }
+
+  async _parkBrowser(account, reason) {
+    if (!account) return;
+    const { accountId, userId, client } = account;
+    const accountKey = this._getAccountKey(accountId, userId);
+    if (account.parking) return;
+    account.parking = true;
+    console.log(`[${accountId}] Parking Chrome (${reason}) — session files kept on disk.`);
+    this._clearReconnectTimer(accountKey);
+    await this._safeDestroyClient(client, accountId);
+    this.accounts.delete(accountKey);
+    this.initializingAccounts.delete(accountKey);
+  }
+
+  async _unloadIdleSessions() {
+    const idleMs = parseInt(process.env.WA_IDLE_UNLOAD_MS || '900000', 10);
+    if (!Number.isFinite(idleMs) || idleMs <= 0) return;
+    const now = Date.now();
+    for (const account of [...this.accounts.values()]) {
+      if (account.status === ACCOUNT_STATUSES.QR && (account.qrCount || 0) >= this._qrParkAfter()) {
+        await this._parkBrowser(account, 'qr-waiting');
+        continue;
+      }
+      if (account.status !== ACCOUNT_STATUSES.READY || !account.client) continue;
+      const last = account.lastUsedAt || (account.createdAt instanceof Date ? account.createdAt.getTime() : 0);
+      if (!last || now - last < idleMs) continue;
+      await this._parkBrowser(account, 'idle');
+    }
   }
 
   _startSessionKeepalive() {
-    const intervalMs = parseInt(process.env.WA_SESSION_KEEPALIVE_MS || '120000', 10);
+    const intervalMs = parseInt(process.env.WA_SESSION_KEEPALIVE_MS || '0', 10);
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
     setInterval(() => {
       this._pingReadySessions().catch((err) => {
@@ -215,22 +263,52 @@ class WhatsAppService {
     const accountKey = this._getAccountKey(trimmed, userId);
 
     if (this.initializingAccounts.has(accountKey)) {
-      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.INITIALIZING);
+      const pending = this.accounts.get(accountKey);
+      if (pending) {
+        try {
+          await this._waitForAccountReady(pending, 25000);
+        } catch {
+          throw new AccountNotReadyError(trimmed, pending.status || ACCOUNT_STATUSES.INITIALIZING);
+        }
+      } else {
+        throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.INITIALIZING);
+      }
     }
 
     let account = this.accounts.get(accountKey);
-    if (!account) {
-      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
-    }
-
     const exists = await AccountModel.exists(trimmed, userId);
     if (!exists) {
       throw new Error(`Account with ID "${trimmed}" not found for this user`);
     }
 
+    if (!account) {
+      const sessionPath = path.join(
+        process.env.SESSION_PATH || './.wwebjs_auth',
+        `session-${accountKey}`,
+      );
+      if (fs.existsSync(sessionPath)) {
+        console.log(`[${trimmed}] Waking parked session for send...`);
+        await this._initializeClientOnce(trimmed, userId);
+        account = this.accounts.get(accountKey);
+      }
+    }
+
+    if (!account) {
+      throw new AccountNotReadyError(trimmed, ACCOUNT_STATUSES.DISCONNECTED);
+    }
+
     const status = account.status || ACCOUNT_STATUSES.INITIALIZING;
-    if (!isMessagingAllowed(status)) {
-      throw new AccountNotReadyError(trimmed, status);
+    if (isInitInProgress(status)) {
+      try {
+        await this._waitForAccountReady(account, 25000);
+      } catch {
+        throw new AccountNotReadyError(trimmed, account.status || status);
+      }
+    }
+
+    const readyStatus = account.status || ACCOUNT_STATUSES.INITIALIZING;
+    if (!isMessagingAllowed(readyStatus)) {
+      throw new AccountNotReadyError(trimmed, readyStatus);
     }
 
     if (!account.client) {
@@ -238,7 +316,7 @@ class WhatsAppService {
     }
 
     // Skip client.info / getState when session is already ready (client.info can hang)
-    if (account.isReady && account.isConnected && status === ACCOUNT_STATUSES.READY) {
+    if (account.isReady && account.isConnected && readyStatus === ACCOUNT_STATUSES.READY) {
       return account;
     }
 
@@ -264,9 +342,9 @@ class WhatsAppService {
       msg.includes('Target closed') ||
       msg.includes('detached Frame') ||
       msg.includes('Session closed') ||
-      msg.includes('Protocol error') ||
-      msg.includes('timed out')
+      msg.includes('Protocol error (')
     ) {
+      // Timeouts alone are RAM pressure — do not destroy a live session.
       console.error(`[${accountId}] Protocol/session error (non-fatal):`, msg);
       const accountKey = this._getAccountKey(accountId, userId);
       this._setAccountStatus(account, accountId, ACCOUNT_STATUSES.FAILED);
@@ -521,6 +599,8 @@ class WhatsAppService {
           if (this.accounts.has(accountKey)) continue;
           const sessionPath = path.join(sessionRoot, `session-${accountKey}`);
           if (!fs.existsSync(sessionPath)) continue;
+          // Never restore QR-waiting / disconnected sessions — they spawn Chrome forever.
+          if (!dbAccount.is_ready) continue;
           console.log(`[${dbAccount.account_id}] Restoring saved session for user ${dbAccount.user_id}...`);
           try {
             await this._initializeClientOnce(dbAccount.account_id, dbAccount.user_id);
@@ -536,8 +616,8 @@ class WhatsAppService {
       };
 
       if (!autoLoad) {
-        console.log('Full auto-load disabled. Restoring existing session folders only.');
-        // maxLoad <= 0 restores every saved session folder (recommended for production)
+        console.log('Full auto-load disabled. Restoring READY session folders only.');
+        // maxLoad <= 0 restores every *ready* saved session (skip QR zombies)
         await restoreFromDisk(maxLoad > 0 ? maxLoad : 0);
         return;
       }
@@ -605,50 +685,41 @@ class WhatsAppService {
   }
 
   async _waitForAccountReady(account, timeoutMs = 60000) {
-
-    if (!account)
-      throw new Error('Account not initialized');
-
-    // جاهز بالفعل
-    if (account.isReady === true)
-      return true;
+    if (!account) throw new Error('Account not initialized');
+    if (account.status === ACCOUNT_STATUSES.READY && account.isReady === true) return true;
 
     return new Promise((resolve, reject) => {
-
       let finished = false;
 
       const done = (result, err) => {
         if (finished) return;
         finished = true;
-
         clearTimeout(timer);
-
-        account.client.removeListener('change_state', onState);
-        account.client.removeListener('disconnected', onDisconnect);
-        account.client.removeListener('auth_failure', onFail);
-
+        clearInterval(tick);
+        if (account.client) {
+          account.client.removeListener('ready', onReady);
+          account.client.removeListener('disconnected', onDisconnect);
+          account.client.removeListener('auth_failure', onFail);
+        }
         err ? reject(err) : resolve(result);
       };
 
-      const onState = (state) => {
-        if (state === 'CONNECTED')
-          done(true);
-      };
-
-      const onDisconnect = () =>
-        done(false, new Error('WhatsApp disconnected'));
-
-      const onFail = () =>
-        done(false, new Error('WhatsApp auth failure'));
+      const onReady = () => done(true);
+      const onDisconnect = () => done(false, new Error('WhatsApp disconnected'));
+      const onFail = () => done(false, new Error('WhatsApp auth failure'));
+      const tick = setInterval(() => {
+        if (account.status === ACCOUNT_STATUSES.READY && account.isReady === true) done(true);
+      }, 400);
 
       const timer = setTimeout(() => {
         done(false, new Error('WhatsApp ready timeout'));
       }, timeoutMs);
 
-      account.client.on('change_state', onState);
-      account.client.on('disconnected', onDisconnect);
-      account.client.on('auth_failure', onFail);
-
+      if (account.client) {
+        account.client.on('ready', onReady);
+        account.client.on('disconnected', onDisconnect);
+        account.client.on('auth_failure', onFail);
+      }
     });
   }
 
@@ -727,17 +798,23 @@ class WhatsAppService {
     });
 
     client.on('qr', qr => {
-      console.log(`[${accountId}] 📱 QR GENERATED`);
+      accountData.qrCount = (accountData.qrCount || 0) + 1;
+      console.log(`[${accountId}] 📱 QR GENERATED (${accountData.qrCount})`);
       accountData.qrCode = qr;
       this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.QR);
+      if (accountData.qrCount >= this._qrParkAfter()) {
+        console.log(`[${accountId}] QR not scanned after ${accountData.qrCount} refreshes — parking Chrome`);
+        setTimeout(() => {
+          this._parkBrowser(accountData, 'qr-waiting').catch(() => {});
+        }, 2000);
+      }
     });
 
     client.on('change_state', async state => {
       accountData.lastState = state;
       console.log(`[${accountId}] STATE -> ${state}`);
 
-      if (state === 'CONNECTED') {
-        this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.READY);
+      if (state === 'CONNECTED' && accountData.status === ACCOUNT_STATUSES.READY) {
         await AccountModel.updateStatus(accountId, userId, true, true);
       }
 
@@ -755,6 +832,8 @@ class WhatsAppService {
 
     client.on('ready', async () => {
       console.log(`[${accountId}] 🔥 WHATSAPP READY`);
+      accountData.qrCount = 0;
+      this._touchAccount(accountData);
       this._setAccountStatus(accountData, accountId, ACCOUNT_STATUSES.READY);
       await AccountModel.updateStatus(accountId, userId, true, true);
     });
@@ -1017,8 +1096,8 @@ class WhatsAppService {
         accountId: row.account_id,
         userId: row.user_id,
         ownerUsername: row.owner_username,
-        isReady: mem ? mem.isReady : !!row.is_ready,
-        isConnected: mem ? mem.isConnected : !!row.is_connected,
+        isReady: !!(mem && mem.status === ACCOUNT_STATUSES.READY && mem.isReady),
+        isConnected: !!(mem && mem.status === ACCOUNT_STATUSES.READY && mem.isConnected),
         status: mem?.status ?? (row.is_ready ? ACCOUNT_STATUSES.DISCONNECTED : ACCOUNT_STATUSES.LOGGED_OUT),
         inMemory: !!mem,
         hasQrCode: mem ? !!mem.qrCode : false,
@@ -1390,8 +1469,11 @@ class WhatsAppService {
       const liveState = await account.client.getState();
       const connected = liveState === 'CONNECTED';
       account.lastState = liveState;
-      if (connected && account.status !== ACCOUNT_STATUSES.READY) {
-        this._setAccountStatus(account, account.accountId, ACCOUNT_STATUSES.READY);
+      // CONNECTED during WhatsApp Web boot is not "ready to send".
+      if (isInitInProgress(account.status)) {
+        /* keep loading / authenticating / qr */
+      } else if (connected && account.status === ACCOUNT_STATUSES.READY) {
+        /* already ready */
       } else if (!connected && account.status === ACCOUNT_STATUSES.READY) {
         this._setAccountStatus(account, account.accountId, ACCOUNT_STATUSES.DISCONNECTED);
       }
@@ -1424,20 +1506,19 @@ class WhatsAppService {
 
     const account = this.getAccount(accountId, userId);
     if (account) {
-      const live = await this._syncLiveState(account);
-      const sessionActive = live.status === ACCOUNT_STATUSES.READY;
-
+      const sessionActive = account.status === ACCOUNT_STATUSES.READY && account.isReady;
+      const booting = isInitInProgress(account.status);
       return {
         accountId: account.accountId,
         userId: account.userId,
-        status: live.status,
-        connected: live.connected,
-        ready: live.ready,
-        liveState: live.liveState,
+        status: account.status,
+        connected: !!account.isConnected,
+        ready: sessionActive,
+        liveState: account.lastState,
         inMemory: true,
         sessionActive,
         qrCode: sessionActive ? null : account.qrCode,
-        needsQr: !sessionActive && !account.qrCode,
+        needsQr: account.status === ACCOUNT_STATUSES.QR || (!sessionActive && !booting && !account.qrCode && account.status !== ACCOUNT_STATUSES.FAILED),
         initError: account.initError || null,
       };
     }
@@ -1445,18 +1526,26 @@ class WhatsAppService {
     try {
       const dbAccount = await AccountModel.findByAccountId(accountId, userId);
       if (dbAccount) {
-        const status = ACCOUNT_STATUSES.LOGGED_OUT;
+        const accountKey = this._getAccountKey(accountId, userId);
+        const sessionPath = path.join(
+          process.env.SESSION_PATH || './.wwebjs_auth',
+          `session-${accountKey}`,
+        );
+        const parked = fs.existsSync(sessionPath);
         return {
           accountId: dbAccount.account_id,
           userId: dbAccount.user_id,
-          status,
+          status: parked ? ACCOUNT_STATUSES.DISCONNECTED : ACCOUNT_STATUSES.LOGGED_OUT,
           connected: false,
           ready: false,
           inMemory: false,
           sessionActive: false,
           qrCode: null,
-          needsQr: true,
-          hint: 'Session not loaded in memory. Scan QR to link again.',
+          needsQr: !parked,
+          parked,
+          hint: parked
+            ? 'Session parked to save RAM. Sending will restore it without a new QR.'
+            : 'Scan QR to link again.',
         };
       }
     } catch (error) {
@@ -1494,7 +1583,7 @@ class WhatsAppService {
         return { ok: true, qr: account.qrCode };
       }
 
-      if (account.isReady && account.isConnected) {
+      if (account.status === ACCOUNT_STATUSES.READY && account.isReady && account.isConnected) {
         return {
           ok: false,
           connected: true,
@@ -1632,6 +1721,7 @@ class WhatsAppService {
 
   async sendMessages(accountId, userId, phoneNumbers, message, options = {}) {
     const account = await this.ensureAccountReady(accountId, userId);
+    this._touchAccount(account);
     const results = [];
     const delayBetween = Math.max(300, options.delayBetweenMs ?? 300);
     const splitMessage = require('../utils/messageSplitter');

@@ -93,7 +93,11 @@ function formatHttpErrorMessage(
         ? (data as Record<string, unknown>)
         : null
     if (body?.error === 'WhatsApp account is not ready' && body.status) {
-      return `Account not ready (${String(body.status)}) — wait until status is "ready"`
+      const st = String(body.status)
+      if (st === 'loading' || st === 'initializing' || st === 'authenticated') {
+        return 'الحساب ما زال يحمّل واتساب — انتظر حتى يصبح جاهزاً'
+      }
+      return `الحساب غير جاهز (${st})`
     }
     if (msg === fallback || msg === 'Request failed') {
       return 'Service temporarily unavailable — retry shortly'

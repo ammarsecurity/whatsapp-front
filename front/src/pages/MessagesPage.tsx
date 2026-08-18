@@ -14,7 +14,7 @@ import { Textarea } from '../components/ui/Textarea'
 import { useAccounts } from '../context/AccountContext'
 import { api, ApiClientError } from '../lib/api'
 import { formatDateTime } from '../lib/format'
-import { formatAccountLabel } from '../lib/accountDisplay'
+import { formatAccountLabel, notReadySendHint } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
 import type { MessageRecord, MessageStatistics } from '../types/messages'
 
@@ -30,7 +30,11 @@ function formatMessageActionError(err: unknown, fallback: string): string {
     return `${err.message} افتح الحسابات ← امسح الجلسات العالقة، ثم امسح رمز QR من جديد.`
   }
   if (err.status === 503) {
-    return `${err.message} انتظر حتى يظهر الحساب جاهزاً للإرسال.`
+    const status = String((err.body as { status?: string } | undefined)?.status || '')
+    if (status === 'loading' || status === 'initializing' || status === 'authenticated') {
+      return 'الحساب ما زال يحمّل واتساب. انتظر قليلاً حتى يظهر «جاهز للإرسال» ثم أعد المحاولة.'
+    }
+    return 'الحساب غير جاهز للإرسال حالياً. حدّث الحالة أو اربطه بمسح QR.'
   }
   return err.message
 }
@@ -306,10 +310,16 @@ export function MessagesPage() {
                     <SelectedAccountStatus statusData={accountStatus} polling={polling} />
                     {!accountReady && (
                       <p className="text-[13px] text-amber-700">
-                        {displayName} غير جاهز.{' '}
-                        <Link to="/accounts" className="font-semibold underline">
-                          ربط بمسح QR
-                        </Link>
+                        {notReadySendHint(accountStatus?.state).action === 'wait' ? (
+                          `${displayName} ${notReadySendHint(accountStatus?.state).line}`
+                        ) : (
+                          <>
+                            {displayName} غير جاهز.{' '}
+                            <Link to="/accounts" className="font-semibold underline">
+                              ربط بمسح QR
+                            </Link>
+                          </>
+                        )}
                       </p>
                     )}
                     <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
@@ -459,7 +469,7 @@ export function MessagesPage() {
               </Button>
               {!accountReady && accountId && (
                 <p className="mt-3 text-center text-[13px] text-muted">
-                  اربط الحساب بمسح QR قبل الإرسال.
+                  {notReadySendHint(accountStatus?.state).footer}
                 </p>
               )}
             </Card>

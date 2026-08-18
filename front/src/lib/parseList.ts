@@ -39,26 +39,28 @@ function normalizeAccount(item: unknown): WaAccount {
     item && typeof item === 'object'
       ? (item as Record<string, unknown>)
       : {}
-  return {
-    accountId: pickId(o),
-    status:
+    const status =
       typeof o.status === 'string'
         ? o.status
         : typeof o.state === 'string'
           ? o.state
-          : undefined,
+          : undefined
+    const flaggedReady =
+      o.isReady === true ||
+      o.is_ready === true ||
+      o.is_ready === 1 ||
+      o.ready === true ||
+      o.ready === 1
+    return {
+    accountId: pickId(o),
+    status,
     phone:
       typeof o.phone === 'string'
         ? o.phone
         : typeof o.phoneNumber === 'string'
           ? o.phoneNumber
           : undefined,
-    isReady:
-      o.isReady === true ||
-      o.is_ready === true ||
-      o.is_ready === 1 ||
-      o.ready === true ||
-      o.ready === 1,
+    isReady: flaggedReady && (!status || status === 'ready'),
     isConnected:
       o.isConnected === true ||
       o.is_connected === true ||
@@ -234,10 +236,10 @@ function normalizeAdminAccount(item: unknown): AdminWaAccount {
         : typeof o.owner_username === 'string'
           ? o.owner_username
           : null,
+    status: typeof o.status === 'string' ? o.status : undefined,
     isReady:
-      o.isReady === true ||
-      o.is_ready === true ||
-      o.is_ready === 1,
+      (o.isReady === true || o.is_ready === true || o.is_ready === 1) &&
+      (!o.status || o.status === 'ready'),
     isConnected:
       o.isConnected === true ||
       o.is_connected === true ||

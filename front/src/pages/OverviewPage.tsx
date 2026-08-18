@@ -21,6 +21,7 @@ import {
   accountStatusLabel,
   formatAccountLabel,
   liveStatusDisplayMeta,
+  notReadySendHint,
 } from '../lib/accountDisplay'
 import { isAccountReady, type ParsedAccountStatus } from '../lib/accountStatus'
 import type { WaAccount } from '../types/models'
@@ -110,9 +111,7 @@ export function OverviewPage() {
 
   const readyCount = useMemo(
     () =>
-      accounts.filter((acc) =>
-        acc.status === 'ready' || acc.isReady === true || acc.ready === true,
-      ).length,
+      accounts.filter((acc) => acc.status === 'ready').length,
     [accounts],
   )
   const needsLinkCount = Math.max(0, accounts.length - readyCount)
@@ -136,7 +135,9 @@ export function OverviewPage() {
     ? 'أضف أول رقم واتساب ثم اربطه بمسح QR للبدء.'
     : accountReady
       ? `${displayName} جاهز للإرسال. انتقل إلى الرسائل أو الحملات.`
-      : `اربط ${displayName} بمسح رمز QR حتى يصبح جاهزاً للإرسال.`
+      : notReadySendHint(selectedLiveStatus?.state).action === 'wait'
+        ? `${displayName} ${notReadySendHint(selectedLiveStatus?.state).line}`
+        : `اربط ${displayName} بمسح رمز QR حتى يصبح جاهزاً للإرسال.`
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">

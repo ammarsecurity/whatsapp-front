@@ -14,7 +14,7 @@ import { useAccounts } from '../context/AccountContext'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { api, ApiClientError } from '../lib/api'
 import { formatDateTime } from '../lib/format'
-import { formatAccountLabel } from '../lib/accountDisplay'
+import { formatAccountLabel, notReadySendHint } from '../lib/accountDisplay'
 import { isAccountReady } from '../lib/accountStatus'
 import { formatPhoneCount } from '../lib/parsePhones'
 import type { CampaignRecord, ContactGroup } from '../types/contacts'
@@ -288,10 +288,16 @@ export function CampaignsPage() {
                       <SelectedAccountStatus statusData={accountStatus} polling={polling} />
                       {!accountReady && (
                         <p className="text-[13px] text-amber-700">
-                          الحساب غير جاهز.{' '}
-                          <Link to="/accounts" className="font-semibold underline">
-                            ربط بمسح QR
-                          </Link>
+                          {notReadySendHint(accountStatus?.state).action === 'wait' ? (
+                            notReadySendHint(accountStatus?.state).line
+                          ) : (
+                            <>
+                              الحساب غير جاهز.{' '}
+                              <Link to="/accounts" className="font-semibold underline">
+                                ربط بمسح QR
+                              </Link>
+                            </>
+                          )}
                         </p>
                       )}
                       <Button variant="ghost" onClick={() => refreshSelectedLiveStatus()}>
@@ -472,7 +478,9 @@ export function CampaignsPage() {
             </Button>
             {!accountReady && !scheduleLater && (
               <p className="mt-3 text-center text-[13px] text-muted">
-                اربط الحساب أولاً، أو فعّل الجدولة لوقت لاحق.
+                {notReadySendHint(accountStatus?.state).action === 'wait'
+                  ? notReadySendHint(accountStatus?.state).footer
+                  : 'اربط الحساب أولاً، أو فعّل الجدولة لوقت لاحق.'}
               </p>
             )}
           </Card>

@@ -71,12 +71,23 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
   const inMemory = boolFlag(src.inMemory)
   const sessionActive = boolFlag(src.sessionActive)
   const needsQr = src.needsQr === true
-  const ready = boolFlag(src.ready) === true || boolFlag(src.isReady) === true
+
+  if (status === 'qr' || liveState === 'qr') {
+    return { state: 'connecting', label: 'يحتاج مسح QR', raw }
+  }
+
+  if (CONNECTING_VALUES.has(status) || CONNECTING_VALUES.has(liveState)) {
+    return { state: 'connecting', label: labelsFor('connecting'), raw }
+  }
+
+  if (needsQr) {
+    return { state: 'connecting', label: 'يحتاج مسح QR', raw }
+  }
 
   if (inMemory === false || sessionActive === false) {
     return {
       state: 'disconnected',
-      label: needsQr || status === 'qr' ? 'يحتاج مسح QR' : labelsFor('disconnected'),
+      label: labelsFor('disconnected'),
       raw,
     }
   }
@@ -85,20 +96,8 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
     return { state: 'connected', label: labelsFor('connected'), raw }
   }
 
-  if (status === 'qr' || needsQr || liveState === 'qr') {
-    return { state: 'connecting', label: 'يحتاج مسح QR', raw }
-  }
-
-  if (CONNECTING_VALUES.has(status) || CONNECTING_VALUES.has(liveState)) {
-    return { state: 'connecting', label: labelsFor('connecting'), raw }
-  }
-
   if (DISCONNECTED_VALUES.has(status) || DISCONNECTED_VALUES.has(liveState)) {
     return { state: 'disconnected', label: labelsFor('disconnected'), raw }
-  }
-
-  if (ready && (!status || status === 'ready')) {
-    return { state: 'connected', label: labelsFor('connected'), raw }
   }
 
   if (raw.success === true && typeof raw.message === 'string') {
@@ -127,5 +126,5 @@ export function isAccountReady(data: unknown): boolean {
   if (status && status !== 'ready') return false
   if (raw.inMemory === false) return false
   if (raw.sessionActive === false) return false
-  return true
+  return status === 'ready'
 }

@@ -15,7 +15,7 @@ import { formatDateTime } from '../lib/format'
 import { formatMb, percentBarColor } from '../lib/formatBytes'
 import type { SystemHealthCheck, SystemHealthResponse } from '../types/systemHealth'
 
-const POLL_MS = 15000
+const POLL_MS = 30000
 
 const CHECK_LABELS: Record<string, string> = {
   systemReady: 'جسر واتساب جاهز',

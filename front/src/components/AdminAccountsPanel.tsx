@@ -16,19 +16,15 @@ import { useConfirm } from '../context/ConfirmContext'
 import { api, ApiClientError } from '../lib/api'
 import { paginateMeta, slicePage } from '../lib/pagination'
 import { parseQrApiResponse } from '../lib/qr'
+import { ACCOUNT_STATUS_STYLES, accountStatusLabel } from '../lib/accountDisplay'
 import type { AdminWaAccount } from '../types/models'
 
 function statusLabel(acc: AdminWaAccount): { text: string; className: string } {
-  if (acc.isConnected || acc.isReady) {
-    return { text: 'متصل', className: 'bg-emerald-50 text-emerald-700' }
-  }
-  if (acc.hasQrCode || acc.liveState === 'INITIALIZING') {
-    return { text: 'بانتظار المسح', className: 'bg-amber-50 text-amber-700' }
-  }
-  if (acc.initError) {
-    return { text: 'خطأ', className: 'bg-red-50 text-red-700' }
-  }
-  return { text: 'غير متصل', className: 'bg-slate-100 text-slate-600' }
+  const meta = accountStatusLabel({
+    ...acc,
+    liveState: acc.liveState ?? undefined,
+  })
+  return { text: meta.label, className: ACCOUNT_STATUS_STYLES[meta.tone] }
 }
 
 export function AdminAccountsPanel() {

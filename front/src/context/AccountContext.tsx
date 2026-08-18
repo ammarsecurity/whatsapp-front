@@ -37,12 +37,7 @@ function pickDefaultAccount(
   if (stored && list.some((a) => a.accountId === stored)) {
     return stored
   }
-  const ready = list.find(
-    (a) =>
-      a.status === 'ready' ||
-      a.isReady === true ||
-      a.ready === true,
-  )
+  const ready = list.find((a) => a.status === 'ready')
   if (ready) return ready.accountId
   return list[0]?.accountId ?? ''
 }

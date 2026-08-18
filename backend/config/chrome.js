@@ -181,14 +181,18 @@ function getPuppeteerConfig() {
       ...baseArgs.filter((a) => !a.startsWith('--headless')),
       '--disable-background-networking',
       '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
       '--disable-component-update',
       '--disable-default-apps',
       '--disable-hang-monitor',
       '--disable-popup-blocking',
       '--disable-prompt-on-repost',
       '--disable-sync',
+      '--disable-translate',
       '--metrics-recording-only',
       '--mute-audio',
+      '--renderer-process-limit=1',
+      '--js-flags=--max-old-space-size=192',
       ...(process.env.CHROME_EXTRA_ARGS
         ? process.env.CHROME_EXTRA_ARGS.split(',').map((s) => s.trim()).filter(Boolean)
         : []),
@@ -197,11 +201,26 @@ function getPuppeteerConfig() {
   };
 }
 
-async function getChromeDiagnostics() {
+let chromeReadyCache = null;
+
+async function getChromeDiagnostics({ probeLaunch = true } = {}) {
   const executablePath = resolveChromePath();
   const exists = fs.existsSync(executablePath);
   const version = exists ? getChromeVersion(executablePath) : null;
-  const launch = exists ? testHeadlessLaunch(executablePath) : { ok: false, error: 'Chrome binary not found' };
+  let launch;
+  if (!exists) {
+    launch = { ok: false, error: 'Chrome binary not found', chromeHome: getChromeHome() };
+  } else if (!probeLaunch && chromeReadyCache?.diag) {
+    launch = {
+      ok: chromeReadyCache.diag.headlessLaunch === true,
+      error: chromeReadyCache.diag.launchError || null,
+      chromeHome: chromeReadyCache.diag.chromeHome || getChromeHome(),
+    };
+  } else if (!probeLaunch) {
+    launch = { ok: true, error: null, chromeHome: getChromeHome() };
+  } else {
+    launch = testHeadlessLaunch(executablePath);
+  }
 
   return {
     platform: process.platform,
@@ -223,22 +242,36 @@ async function getChromeDiagnostics() {
 }
 
 async function assertChromeReady() {
-  const diag = await getChromeDiagnostics();
+  if (chromeReadyCache && Date.now() - chromeReadyCache.at < 15 * 60 * 1000) {
+    return chromeReadyCache.diag;
+  }
 
-  if (!diag.exists) {
+  const executablePath = resolveChromePath();
+  const exists = fs.existsSync(executablePath);
+  if (!exists) {
     throw new Error(
-      `Chrome not found at ${diag.executablePath}. Set CHROME_PATH=/usr/bin/google-chrome in .env`,
+      `Chrome not found at ${executablePath}. Set CHROME_PATH=/usr/bin/google-chrome in .env`,
     );
   }
 
-  if (!diag.headlessLaunch) {
-    const detail = diag.launchError || 'unknown error';
-    throw new Error(
-      `Chrome failed headless launch (${detail}). Install Ubuntu dependencies: sudo bash scripts/ubuntu-chrome-setup.sh`,
-    );
+  // Full headless probe only once — spawning extra Chrome on every account init wastes RAM.
+  if (!chromeReadyCache) {
+    const diag = await getChromeDiagnostics();
+    if (!diag.headlessLaunch) {
+      const detail = diag.launchError || 'unknown error';
+      throw new Error(
+        `Chrome failed headless launch (${detail}). Install Ubuntu dependencies: sudo bash scripts/ubuntu-chrome-setup.sh`,
+      );
+    }
+    chromeReadyCache = { at: Date.now(), diag };
+    return diag;
   }
 
-  return diag;
+  chromeReadyCache = {
+    at: Date.now(),
+    diag: { ...chromeReadyCache.diag, exists: true, executablePath },
+  };
+  return chromeReadyCache.diag;
 }
 
 function logChromeStartupCheck() {

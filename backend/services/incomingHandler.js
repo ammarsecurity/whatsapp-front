@@ -15,10 +15,18 @@ async function handleIncoming(accountId, userId, msg, client) {
   try {
     if (msg.fromMe) return;
 
-    const contact = await msg.getContact();
-    const phoneRaw = contact?.number || msg.from?.replace(/@.*/, '') || '';
+    const phoneRaw = String(msg.from || '').replace(/@.*/, '');
     const body = msg.body || '';
-    const contactName = contact?.pushname || contact?.name || null;
+    let contactName = null;
+    try {
+      const contact = await Promise.race([
+        msg.getContact(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('contact-timeout')), 2000)),
+      ]);
+      contactName = contact?.pushname || contact?.name || null;
+    } catch {
+      /* skip extra Chrome work when the session is under memory pressure */
+    }
 
     const inboxId = await InboxMessage.create({
       userId,

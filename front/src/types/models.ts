@@ -18,6 +18,7 @@ export interface AdminWaAccount {
   accountId: string
   userId: number
   ownerUsername?: string | null
+  status?: string
   isReady?: boolean
   isConnected?: boolean
   inMemory?: boolean

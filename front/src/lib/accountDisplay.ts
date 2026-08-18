@@ -48,14 +48,18 @@ export function accountStatusLabel(acc: {
   const status = String(acc.status ?? '').toLowerCase()
   const liveState = String(acc.liveState ?? '').toLowerCase()
 
-  if (status === 'ready') {
-    return { label: 'جاهز للإرسال', tone: 'ready' }
-  }
-
   if (['qr', 'loading', 'initializing', 'authenticated'].includes(status)) {
     return status === 'qr'
       ? { label: 'يحتاج مسح QR', tone: 'connecting' }
       : { label: 'جارٍ الربط…', tone: 'connecting' }
+  }
+
+  if (['opening', 'pairing', 'timeout', 'conflict'].includes(liveState)) {
+    return { label: 'جارٍ الربط…', tone: 'connecting' }
+  }
+
+  if (status === 'ready') {
+    return { label: 'جاهز للإرسال', tone: 'ready' }
   }
 
   if (['logged_out', 'failed', 'disconnected'].includes(status)) {
@@ -70,14 +74,7 @@ export function accountStatusLabel(acc: {
     return { label: 'غير مرتبط', tone: 'offline' }
   }
 
-  if (acc.isReady || acc.ready) {
-    return { label: 'جاهز للإرسال', tone: 'ready' }
-  }
-
-  if (acc.isConnected || acc.connected) {
-    return { label: 'يحتاج مسح QR', tone: 'connecting' }
-  }
-
+  // Do not trust stale DB isReady — only live status === ready means sendable.
   return { label: 'غير مرتبط', tone: 'offline' }
 }
 
@@ -111,3 +108,19 @@ export const ACCOUNT_STATUS_STYLES = {
   offline: 'bg-red-50 text-red-700',
   unknown: 'bg-slate-100 text-slate-600',
 } as const
+
+/** Copy for send/campaign screens when the session is not send-ready. */
+export function notReadySendHint(state?: 'connected' | 'connecting' | 'disconnected' | 'unknown' | null) {
+  if (state === 'connecting') {
+    return {
+      line: 'جارٍ الربط — انتظر حتى يصبح جاهزاً للإرسال.',
+      footer: 'انتظر حتى يصبح الحساب جاهزاً ثم أرسل.',
+      action: 'wait' as const,
+    }
+  }
+  return {
+    line: 'الحساب غير مرتبط. اربطه بمسح QR.',
+    footer: 'اربط الحساب بمسح QR قبل الإرسال.',
+    action: 'qr' as const,
+  }
+}

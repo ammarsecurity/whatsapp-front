@@ -77,7 +77,7 @@ function countChromeProcesses() {
  * @param {import('../services/whatsapp')} whatsappService
  */
 async function getSystemHealth(whatsappService) {
-  const chrome = await getChromeDiagnostics();
+  const chrome = await getChromeDiagnostics({ probeLaunch: false });
   const proc = process.memoryUsage();
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
@@ -91,7 +91,7 @@ async function getSystemHealth(whatsappService) {
     dbAccounts = [];
   }
 
-  const connected = dbAccounts.filter((a) => a.isConnected || a.isReady).length;
+  const connected = dbAccounts.filter((a) => a.status === 'ready' && a.isReady).length;
   const offline = dbAccounts.length - connected;
   const withErrors = dbAccounts.filter((a) => a.initError).length;
   const awaitingQr = dbAccounts.filter((a) => a.hasQrCode).length;

@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiClientError } from '../lib/api'
-import {
-  parseAccountStatus,
-  isAccountReady,
-  type ParsedAccountStatus,
-} from '../lib/accountStatus'
+import { parseAccountStatus, type ParsedAccountStatus } from '../lib/accountStatus'
 
-const POLL_MS = 5000
+const POLL_MS = 12000
 
 export function useAccountStatusPoll(accountId: string, enabled: boolean) {
   const [status, setStatus] = useState<ParsedAccountStatus | null>(null)
@@ -40,10 +36,6 @@ export function useAccountStatusPoll(accountId: string, enabled: boolean) {
     const tick = async () => {
       const result = await fetchStatus()
       if (!active || !result) return
-      if (isAccountReady(result.data)) {
-        setPolling(false)
-        if (intervalId) clearInterval(intervalId)
-      }
     }
 
     setPolling(true)

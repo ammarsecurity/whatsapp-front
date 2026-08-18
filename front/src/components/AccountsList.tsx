@@ -1,6 +1,7 @@
 import { Check, RefreshCw, Smartphone, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiClientError } from '../lib/api'
+import { accountStatusLabel } from '../lib/accountDisplay'
 import type { WaAccount } from '../types/models'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
@@ -19,30 +20,21 @@ interface AccountsListProps {
 }
 
 function statusFromAccount(acc: WaAccount): AccountWithLiveStatus {
-  const connected =
-    acc.isConnected === true ||
-    acc.connected === true ||
-    acc.status === 'connected'
-  const ready =
-    acc.isReady === true ||
-    acc.ready === true ||
-    connected
+  const meta = accountStatusLabel(acc)
+  const connectionState: AccountWithLiveStatus['connectionState'] =
+    meta.tone === 'ready'
+      ? 'connected'
+      : meta.tone === 'connecting'
+        ? 'connecting'
+        : meta.tone === 'offline'
+          ? 'disconnected'
+          : 'unknown'
 
-  let connectionState: AccountWithLiveStatus['connectionState'] = 'unknown'
-  let connectionLabel = 'Unknown'
-
-  if (connected || ready) {
-    connectionState = 'connected'
-    connectionLabel = 'Connected'
-  } else if (acc.status === 'connecting') {
-    connectionState = 'connecting'
-    connectionLabel = 'Connecting…'
-  } else {
-    connectionState = 'disconnected'
-    connectionLabel = 'Disconnected'
+  return {
+    ...acc,
+    connectionState,
+    connectionLabel: meta.label,
   }
-
-  return { ...acc, connectionState, connectionLabel }
 }
 
 export function AccountsList({

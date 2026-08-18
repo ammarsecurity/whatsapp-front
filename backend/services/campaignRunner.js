@@ -8,11 +8,6 @@ const { resolveMessage } = require('../utils/resolveMessage');
 const webhookDispatcher = require('./webhookDispatcher');
 const wsHub = require('./wsHub');
 const { withTimeout } = require('../utils/withTimeout');
-const {
-  ACCOUNT_STATUSES,
-  AccountNotReadyError,
-  isMessagingAllowed,
-} = require('../utils/accountLifecycle');
 
 async function resolveRecipients(userId, { groupId, phoneNumbers }) {
   let recipients = [];
@@ -42,15 +37,7 @@ async function resolveRecipients(userId, { groupId, phoneNumbers }) {
 }
 
 function assertSessionReady(accountId, userId) {
-  const accountKey = `${userId}_${accountId}`;
-  const account = whatsappService.accounts.get(accountKey);
-  if (!account || !account.isReady || !isMessagingAllowed(account.status)) {
-    throw new AccountNotReadyError(
-      accountId,
-      account?.status ?? ACCOUNT_STATUSES.DISCONNECTED,
-    );
-  }
-  return account;
+  return whatsappService.ensureAccountReady(accountId, userId);
 }
 
 async function executeCampaignSend({
@@ -226,7 +213,7 @@ async function runCampaign(userId, params, { background = false } = {}) {
     String(name || '').trim() ||
     (groupName ? `Campaign — ${groupName}` : `Campaign ${new Date().toLocaleDateString()}`);
 
-  assertSessionReady(trimmedId, userId);
+  await assertSessionReady(trimmedId, userId);
 
   let campaignId = existingId;
   if (!campaignId) {
