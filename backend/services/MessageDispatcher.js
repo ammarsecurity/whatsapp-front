@@ -1,4 +1,5 @@
-// WhatsAppService.js - Session-Driven Engine (Production Stable)
+// UNUSED — production uses services/whatsapp.js only. Do not require this file;
+// a second Client/Chrome per account would duplicate browsers and exhaust RAM.
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
 const EventEmitter = require('events');

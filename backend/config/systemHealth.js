@@ -84,6 +84,7 @@ async function getSystemHealth(whatsappService) {
   const usedMem = totalMem - freeMem;
 
   const runtime = whatsappService.getRuntimeStats();
+  const resources = runtime.resources || null;
   let dbAccounts = [];
   try {
     dbAccounts = await whatsappService.getAllAccountsAdmin();
@@ -135,8 +136,16 @@ async function getSystemHealth(whatsappService) {
     {
       id: 'memoryPressure',
       label: 'System RAM usage',
-      ok: systemMemoryMb.usedPercent < 90,
+      ok: systemMemoryMb.usedPercent < 85,
       detail: `${systemMemoryMb.usedPercent}% used (${systemMemoryMb.used}/${systemMemoryMb.total} MB)`,
+    },
+    {
+      id: 'liveSessions',
+      label: 'Live WhatsApp browsers',
+      ok: !resources?.overLive,
+      detail: resources
+        ? `${resources.liveInstances}/${resources.maxLive} (Chrome processes: ${resources.chromeProcessCount})`
+        : `${runtime.inMemoryCount} in memory`,
     },
   ];
 
@@ -178,11 +187,13 @@ async function getSystemHealth(whatsappService) {
       connected,
       offline,
       inMemory: runtime.inMemoryCount,
+      liveBrowsers: runtime.liveBrowsers ?? runtime.inMemoryCount,
       initLocks: runtime.initLocks,
       reconnectTimers: runtime.reconnectTimers,
       awaitingQr,
       withErrors,
       sessions: runtime.sessions,
+      resources,
     },
     env: {
       sessionPath: process.env.SESSION_PATH || './.wwebjs_auth',

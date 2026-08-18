@@ -193,6 +193,7 @@ function getPuppeteerConfig() {
       '--mute-audio',
       '--renderer-process-limit=1',
       '--js-flags=--max-old-space-size=192',
+      '--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints',
       ...(process.env.CHROME_EXTRA_ARGS
         ? process.env.CHROME_EXTRA_ARGS.split(',').map((s) => s.trim()).filter(Boolean)
         : []),

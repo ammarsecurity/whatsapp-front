@@ -15,6 +15,7 @@ const CONNECTING_VALUES = new Set([
   'pending',
   'initializing',
   'authenticated',
+  'reconnecting',
 ])
 
 const DISCONNECTED_VALUES = new Set([
@@ -26,6 +27,7 @@ const DISCONNECTED_VALUES = new Set([
   'unpaired',
   'logged_out',
   'failed',
+  'stopped',
 ])
 
 function norm(value: unknown): string {
@@ -72,8 +74,16 @@ export function parseAccountStatus(data: unknown): ParsedAccountStatus {
   const sessionActive = boolFlag(src.sessionActive)
   const needsQr = src.needsQr === true
 
+  if (status === 'reconnecting' || liveState === 'reconnecting') {
+    return { state: 'connecting', label: 'جارٍ إعادة الاتصال…', raw }
+  }
+
   if (status === 'qr' || liveState === 'qr') {
     return { state: 'connecting', label: 'يحتاج مسح QR', raw }
+  }
+
+  if (status === 'stopped' || src.parked === true) {
+    return { state: 'disconnected', label: 'متوقف لتوفير الرام', raw }
   }
 
   if (CONNECTING_VALUES.has(status) || CONNECTING_VALUES.has(liveState)) {

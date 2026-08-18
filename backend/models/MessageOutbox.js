@@ -60,6 +60,18 @@ class MessageOutbox {
       [id],
     );
   }
+
+  static async listQueuedAccounts() {
+    const [rows] = await pool.execute(
+      `SELECT user_id, account_id, COUNT(*) AS queued
+       FROM message_outbox
+       WHERE status = 'queued'
+       GROUP BY user_id, account_id
+       ORDER BY MIN(id) ASC
+       LIMIT 50`,
+    );
+    return rows;
+  }
 }
 
 module.exports = MessageOutbox;

@@ -202,7 +202,7 @@ router.get('/qr', async (req, res) => {
 // System readiness + Chrome diagnostics (Ubuntu)
 router.get('/system', async (req, res) => {
     try {
-        const chrome = await getChromeDiagnostics();
+        const chrome = await getChromeDiagnostics({ probeLaunch: false });
         res.json({
             ready: global.systemReady === true,
             apiBuild: API_BUILD,

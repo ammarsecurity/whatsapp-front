@@ -48,10 +48,10 @@ export function accountStatusLabel(acc: {
   const status = String(acc.status ?? '').toLowerCase()
   const liveState = String(acc.liveState ?? '').toLowerCase()
 
-  if (['qr', 'loading', 'initializing', 'authenticated'].includes(status)) {
-    return status === 'qr'
-      ? { label: 'يحتاج مسح QR', tone: 'connecting' }
-      : { label: 'جارٍ الربط…', tone: 'connecting' }
+  if (['qr', 'loading', 'initializing', 'authenticated', 'pairing', 'reconnecting'].includes(status)) {
+    if (status === 'qr') return { label: 'يحتاج مسح QR', tone: 'connecting' }
+    if (status === 'reconnecting') return { label: 'جارٍ إعادة الاتصال…', tone: 'connecting' }
+    return { label: 'جارٍ الربط…', tone: 'connecting' }
   }
 
   if (['opening', 'pairing', 'timeout', 'conflict'].includes(liveState)) {
@@ -60,6 +60,10 @@ export function accountStatusLabel(acc: {
 
   if (status === 'ready') {
     return { label: 'جاهز للإرسال', tone: 'ready' }
+  }
+
+  if (status === 'stopped') {
+    return { label: 'متوقف لتوفير الرام', tone: 'offline' }
   }
 
   if (['logged_out', 'failed', 'disconnected'].includes(status)) {
