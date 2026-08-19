@@ -14,7 +14,10 @@ import {
   setApiUrl,
 } from '../lib/storage'
 
-const PRESETS = [{ label: 'من ملف .env', url: DEFAULT_API_URL }]
+const PRESETS = [
+  { label: 'القديم (Chrome)', url: DEFAULT_API_URL },
+  { label: 'الجديد (Baileys)', url: 'https://whatsapp.smartstick-iq.com:8490' },
+]
 
 type Tab = 'account' | 'integrations' | 'optout' | 'docs' | 'config'
 

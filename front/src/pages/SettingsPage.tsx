@@ -14,7 +14,10 @@ import {
   setApiUrl,
 } from '../lib/storage'
 
-const PRESETS = [{ label: 'من ملف .env', url: DEFAULT_API_URL }]
+const PRESETS = [
+  { label: 'القديم (Chrome)', url: DEFAULT_API_URL },
+  { label: 'الجديد (Baileys)', url: 'https://whatsapp.smartstick-iq.com:8490' },
+]
 
 type Tab = 'account' | 'integrations' | 'optout' | 'docs' | 'config'
 
@@ -191,7 +194,7 @@ export function SettingsPage() {
                 value={apiUrl}
                 onChange={(e) => setApiUrlState(e.target.value)}
                 placeholder={DEFAULT_API_URL}
-                hint="بدون شرطة في النهاية. يُستخدم لكل طلبات اللوحة وأمثلة cURL."
+                hint="بدون شرطة في النهاية. اختر الباك إند القديم أو الجديد (Baileys على HTTPS) ثم احفظ وحدّث الصفحة."
               />
 
               <div className="flex flex-wrap gap-2">
