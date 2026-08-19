@@ -87,6 +87,7 @@ class WhatsAppService {
     this._generationSeq = 0;
     this.loadAccountsFromDb();
     this._startIdleUnloader();
+    this._startKeepalive();
     require('./outbox').startWorker();
   }
 
@@ -166,13 +167,26 @@ class WhatsAppService {
   }
 
   _startIdleUnloader() {
-    const idleMs = parseEnvInt('WA_IDLE_UNLOAD_MS', 900000);
+    const idleMs = parseEnvInt('WA_IDLE_UNLOAD_MS', 14400000);
     if (!idleMs) return;
     setInterval(() => {
       this._unloadIdleSessions().catch((err) => {
         console.warn('[idle-unload]', err.message);
       });
     }, 60000);
+  }
+
+  _startKeepalive() {
+    const keepAliveMs = parseEnvInt('WA_SESSION_KEEPALIVE_MS', 60000);
+    if (!keepAliveMs) return;
+    setInterval(() => {
+      const now = Date.now();
+      for (const account of this.accounts.values()) {
+        if (account.status === ACCOUNT_STATUSES.READY && this._isLiveInstance(account)) {
+          account.lastUsedAt = now;
+        }
+      }
+    }, Math.max(30000, keepAliveMs));
   }
 
   async _unloadIdleSessions() {
